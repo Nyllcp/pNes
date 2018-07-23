@@ -292,12 +292,12 @@ namespace pNes
                             }
                         }
                     }
-                    }
+                }
                 if(pixelplace > 7)
                 {
-                    if (((ppuAddress + 1)  & 64) != 64)
+                    if ((IncrementedPpuAddress(ppuAddress) & 64) != 64)
                     {
-                        if (((ppuAddress + 1) & 2) == 2)
+                        if ((IncrementedPpuAddress(ppuAddress) & 2) == 2)
                         {
                             pixel |= (byte)((bufferTileAttribute & 0x3) << 2);
                         }
@@ -308,7 +308,7 @@ namespace pNes
                     }
                     else
                     {
-                        if (((ppuAddress + 1) & 2) == 2)
+                        if ((IncrementedPpuAddress(ppuAddress) & 2) == 2)
                         {
                             pixel |= (byte)(((bufferTileAttribute >> 4) & 0x3) << 2);
                         }
@@ -344,6 +344,8 @@ namespace pNes
                     }
                 }
                 
+
+
                 if ((pixel & 3) == 0) pixel = 0;
                 scanlinebuffer[currentDot] = pixel;
             }
@@ -357,18 +359,17 @@ namespace pNes
         private void FetchNewTile()
         {
             int tileAddress = 0x2000 | (ppuAddress & 0x0FFF);
-            int attributeAddress = 0x23C0 | (ppuAddress & 0x0C00) | ((ppuAddress >> 4) & 0x38) | ((ppuAddress >> 2) & 0x07);
-
+            int attributeAddress = 0x23C0 | (ppuAddress & 0x0C00) | ((ppuAddress >> 4) & 0x38) | ((ppuAddress >> 2) & 0x07); 
             int row = (ppuAddress >> 12) & 0x7;
             tilePointer = ((ReadPpuMemory(tileAddress) * 0x10) + row) | backgroundTableAdress;
 
             tileAttribute = bufferTileAttribute;
-            bufferTileAttribute = ReadPpuMemory(attributeAddress);
             tileData0 = (tileData0 & 0xFF) << 8;
             tileData1 = (tileData1 & 0xFF) << 8;
             tileData0 |= ReadPpuMemory(tilePointer);
             tileData1 |= ReadPpuMemory(tilePointer + 8);
-
+            bufferTileAttribute = ReadPpuMemory(attributeAddress);
+ 
             if ((ppuAddress & 0x001F) == 31)
             {
                 // if coarse X == 31
@@ -379,10 +380,22 @@ namespace pNes
             {
                 ppuAddress += 1;              // increment coarse X
             }
+        }
 
-     
-
-
+        private int IncrementedPpuAddress(int address)
+        {
+            int value = address;
+            if ((value & 0x001F) == 31)
+            {
+                // if coarse X == 31
+                value &= ~0x001F;      // coarse X = 0
+                value ^= 0x0400;         // switch horizontal nametable
+            }
+            else
+            {
+                value += 1;              // increment coarse X
+            }
+            return value;
         }
         private void IncrementY()
         {
