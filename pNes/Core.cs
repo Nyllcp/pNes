@@ -9,18 +9,30 @@ namespace pNes
     class Core
     {
         private Cart _cart;
-        private Cpu _cpu;
+        //private Cpu _cpu;
+        private Processor _cpu;
         private Ppu _ppu;
+        private Apu _apu;
+
+        private byte pad1;
+        private bool strobingPad = false;
+        private bool apuEveryOtherCycle = false;
+        private int padShiftCounter = 0;
+
+        private int _lastCycles;
 
         private byte[] ram = new byte[0x800];
 
         public uint[] Frame { get { return _ppu.Frame; } }
+        public byte Pad1 { get { return pad1; } set { pad1 = value; } }
+        
 
         public Core()
         {
             _cart = new Cart();
-            _cpu = new Cpu(this);
+            _cpu = new Processor(this);
             _ppu = new Ppu(_cart,this);
+            _apu = new Apu();
         }
 
         public bool LoadRom(string fileName)
@@ -32,19 +44,29 @@ namespace pNes
 
         public void RunOneFrame()
         {
+            _lastCycles = _cpu.GetCycleCount();
             while(!_ppu.FrameReady)
             {
                 MachineCycle();
             }
+            int cyclesPerFrame = _cpu.GetCycleCount() - _lastCycles;
         }
 
         public void MachineCycle()
         {
+            _ppu.Tick();  
             _ppu.Tick();
-            if (_ppu.CheckNMI()) _cpu.NonMaskableInterrupt();
             _ppu.Tick();
-            _ppu.Tick();
+            if (apuEveryOtherCycle) _apu.Tick();
+            if (_apu.IFlag) _cpu.InterruptRequest();
             _cpu.NextStep();
+            apuEveryOtherCycle = !apuEveryOtherCycle;
+        }
+
+        public void NonMaskableIntterupt()
+        {
+            _cpu.TriggerNmi = true;
+            //_cpu.NonMaskableInterrupt();
         }
 
         //Address range   Size Device
@@ -73,7 +95,24 @@ namespace pNes
             {
                 //$4000-$4017	$0018	NES APU and I/O registers
                 //$4018-$401F	$0008	APU and I/O functionality that is normally disabled.See CPU Test Mode.
-                return 0;
+                if (address < 0x4014) return _apu.ReadApuRegister(address);
+                if (address == 0x4016)
+                {
+                    int val = 0;
+                    if (strobingPad) val = pad1 & 1;
+                    else
+                    {
+                        val = (pad1 >> padShiftCounter++) & 1;                
+                    }
+                    return (byte)(val |= 0x40);
+                }
+                if (address == 0x4017) return _apu.ReadApuRegister(address);
+                else
+                {
+                    return 0;
+                }
+                
+            
             }
             else
             {
@@ -85,7 +124,11 @@ namespace pNes
         public void WriteMemory(int address, byte data)
         {
             address &= 0xFFFF;
-            if(address < 0x2000)
+            if(address == 0x0c)
+            {
+
+            }
+            if (address < 0x2000)
             {
                 ram[address & 0x7FF] = data;
             }
@@ -97,7 +140,14 @@ namespace pNes
             {
                 //$4000-$4017	$0018	NES APU and I/O registers
                 //$4018-$401F	$0008	APU and I/O functionality that is normally disabled.See CPU Test Mode.
-                if (address == 0x4014) _ppu.WritePpuRegister(address, data); 
+                if (address < 0x4014) _apu.WriteApuRegister(address, data);
+                else if (address == 0x4014) _ppu.WritePpuRegister(address, data);
+                else if (address == 0x4016)
+                {
+                    strobingPad = ((data & 1) != 0) ? true : false;
+                    padShiftCounter = 0;
+                }
+                else if (address == 0x4017) _apu.WriteApuRegister(address, data);
             }
             else
             {

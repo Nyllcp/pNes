@@ -32,6 +32,8 @@ namespace pNes
         private int frames;
         private int curentTime;
         private int lastTime;
+        private int keyData;
+        private int keyDataLast;
 
         private byte[] _frame = new byte[nesWidth * nesHeight * 4]; //4 Bytes per pixel
 
@@ -83,6 +85,7 @@ namespace pNes
             while(run)
             {
                 _drawingSurface.Select();
+                Input();
                 _nes.RunOneFrame();
                
                 UpdateFrameRGB(_nes.Frame);
@@ -167,6 +170,64 @@ namespace pNes
         {
             run = false;
             Application.Exit();
+        }
+        private void Input()
+        {
+            keyDataLast = keyData;
+            keyData = 0;
+            if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.Right))
+            {
+                keyData |= (1 << 7);
+            }
+            if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.Left))
+            {
+                keyData |= (1 << 6);
+            }
+            if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.Down))
+            {
+                keyData |= (1 << 5);
+            }
+            if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.Up))
+            {
+                keyData |= (1 << 4);
+            }
+            if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.S))
+            {
+                keyData |= (1 << 3);
+            }
+            if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.A))
+            {
+                keyData |= (1 << 2);
+            }
+            if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.Z))
+            {
+                keyData |= (1 << 1);
+            }
+            if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.X))
+            {
+                keyData |= (1 << 0);
+            }
+            if (keyData != keyDataLast)
+            {
+                _nes.Pad1 = (byte)keyData;
+            }
+
+            //if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.Q) || SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.C) && !frameLimitToggle)
+            //{
+            //    frameLimit = !frameLimit;
+            //}
+            //frameLimitToggle = SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.Q) | SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.C);
+
+            //if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.E) && !saveStateToggle)
+            //{
+            //    _gameboy.SaveState = true;
+            //}
+            //if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.R) && !saveStateToggle)
+            //{
+            //    _gameboy.LoadState = true;
+            //}
+            //saveStateToggle = SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.R) | SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.E);
+
         }
     }
 }

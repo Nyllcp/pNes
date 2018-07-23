@@ -1,5 +1,7 @@
-﻿using System;
+﻿
+using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 
 namespace pNes
@@ -7,21 +9,33 @@ namespace pNes
     /// <summary>
     /// An Implementation of a 6502 Processor
     /// </summary>
-    class Cpu
+    [Serializable]
+    class Processor
     {
         #region Fields
+        //private static readonly ILogger _logger = LogManager.GetLogger("Processor");
+        private Core _core;
+        
         private int _programCounter;
         private int _stackPointer;
-        private Core _core;
+        private int _cycleCount;
+        private int _cycleCountStep;
+        private bool _previousInterrupt;
+        private bool _interrupt;
         #endregion
 
         //All of the properties here are public and read only to facilitate ease of debugging and testing.
         #region Properties
         /// <summary>
+        /// The memory
+        /// </summary>
+       // protected byte[] Memory { get; private set; }
+
+        /// <summary>
         /// The Accumulator. This value is implemented as an integer intead of a byte.
         /// This is done so we can detect wrapping of the value and set the correct number of cycles.
         /// </summary>
-        public int Accumulator { get; private set; }
+        public int Accumulator { get; protected set; }
         /// <summary>
         /// The X Index Register
         /// </summary>
@@ -35,6 +49,10 @@ namespace pNes
         /// </summary>
         public int CurrentOpCode { get; private set; }
 
+        /// <summary>
+        /// The disassembly of the current operation. This value is only set when the CPU is built in debug mode.
+        /// </summary>
+        ////public Disassembly CurrentDisassembly { get; private set; }
         /// <summary>
         /// Points to the Current Address of the instruction being executed by the system. 
         /// The PC wraps when the value is greater than 65535, or less than 0. 
@@ -61,23 +79,18 @@ namespace pNes
                     _stackPointer = value;
             }
         }
+
         /// <summary>
-        /// The number of cycles before the next interrupt.
+        /// An external action that occurs when the cycle count is incremented
         /// </summary>
-        public int InterruptPeriod { get; private set; }
-        /// <summary>
-        /// The number of cycles left before the next interrupt.
-        /// </summary>
-        public int NumberofCyclesLeft { get; private set; }
-        /// <summary>
-        /// The Memory
-        /// </summary>
+        public Action CycleCountIncrementedAction { get; set; }
+
         //Status Registers
         /// <summary>
         /// This is the carry flag. when adding, if the result is greater than 255 or 99 in BCD Mode, then this bit is enabled. 
         /// In subtraction this is reversed and set to false if a borrow is required IE the result is less than 0
         /// </summary>
-        public bool CarryFlag { get; private set; }
+        public bool CarryFlag { get; protected set; }
         /// <summary>
         /// Is true if one of the registers is set to zero.
         /// </summary>
@@ -100,23 +113,34 @@ namespace pNes
         /// 64 + 64 = -128 
         /// -128 + -128 = 0
         /// </summary>
-        public bool OverflowFlag { get; private set; }
+        public bool OverflowFlag { get; protected set; }
         /// <summary>
         /// Set to true if the result of an operation is negative in ADC and SBC operations. 
         /// Remember that 128-256 represent negative numbers when doing signed math.
         /// In shift operations the sign holds the carry.
         /// </summary>
         public bool NegativeFlag { get; private set; }
+
+        /// <summary>
+        /// Set to true when an NMI should occur
+        /// </summary>
+        public bool TriggerNmi { get; set; }
+
+        /// Set to true when an IRQ has occurred and is being processed by the CPU
+        public bool TriggerIRQ { get; private set; }
         #endregion
 
         #region Public Methods
         /// <summary>
         /// Default Constructor, Instantiates a new instance of the processor.
         /// </summary>
-        /// 
-        public Cpu(Core core)
+        public Processor(Core core)
         {
+            //Memory = new byte[0x10000];
             _core = core;
+            StackPointer = 0x100;
+
+            CycleCountIncrementedAction = () => { };
         }
 
         /// <summary>
@@ -124,23 +148,23 @@ namespace pNes
         /// </summary>
         public void Reset()
         {
+            ResetCycleCount();
+
             StackPointer = 0x1FD;
 
             //Set the Program Counter to the Reset Vector Address.
             ProgramCounter = 0xFFFC;
             //Reset the Program Counter to the Address contained in the Reset Vector
-            ProgramCounter = GetAddressByAddressingMode(AddressingMode.Absolute);
-
-            InterruptPeriod = 20;
-            NumberofCyclesLeft = InterruptPeriod;
+            ProgramCounter = (_core.ReadMemory(ProgramCounter) | (_core.ReadMemory(ProgramCounter + 1) << 8)); ;
 
             CurrentOpCode = _core.ReadMemory(ProgramCounter);
 
-//#if DEBUG
-//            SetDisassembly();
-//#endif
+            //SetDisassembly();
 
             DisableInterruptFlag = true;
+            _previousInterrupt = false;
+            TriggerNmi = false;
+            TriggerIRQ = false;
         }
 
         /// <summary>
@@ -148,25 +172,32 @@ namespace pNes
         /// </summary>
         public void NextStep()
         {
-            if (NumberofCyclesLeft > 0)
+
+            //Have to read this first otherwise it causes tests to fail on a NES
+            if (_cycleCountStep-- > 0)
             {
-                NumberofCyclesLeft--;
                 return;
             }
+
+            CurrentOpCode = ReadMemoryValue(ProgramCounter);
+
             ProgramCounter++;
+
             ExecuteOpCode();
 
-            //We want to add here instead of replace because the number of cycles left could be zero.
-            //if (NumberofCyclesLeft < 0)
-            //    NumberofCyclesLeft += InterruptPeriod;
-
-            //Grabbing this at the end, ensure thats when we read the CurrentOp Code field, that we have the correct OpCode for the instruction we are going to execute Next.
-            CurrentOpCode = _core.ReadMemory(ProgramCounter);
-
-//#if DEBUG
-//            SetDisassembly();
-//#endif
-
+            if (_previousInterrupt)
+            {
+                if (TriggerNmi)
+                {
+                    ProcessNMI();
+                    TriggerNmi = false;
+                }
+                else if (TriggerIRQ)
+                {
+                    ProcessIRQ();
+                    TriggerIRQ = false;
+                }
+            }
         }
 
         /// <summary>
@@ -176,35 +207,93 @@ namespace pNes
         /// <param name="program">The program to be loaded</param>
         /// <param name="initialProgramCounter">The initial PC value, this is the entry point of the program</param>
 
+        /// <summary>
+        /// Loads a program into the processors memory
+        /// </summary>
+        /// <param name="offset">The offset in memory when loading the program.</param>
+        /// <param name="program">The program to be loaded</param>
 
         /// <summary>
         /// The InterruptRequest or IRQ
         /// </summary>
         public void InterruptRequest()
         {
-            if (DisableInterruptFlag)
-                return;
-
-            ProgramCounter--;
-            BreakOperation(false, 0xFFFE);
-            CurrentOpCode = _core.ReadMemory(ProgramCounter);
-//#if DEBUG
-//            SetDisassembly();
-//#endif
+            TriggerIRQ = true;
         }
 
         /// <summary>
-        /// The InterruptRequest or IRQ
+        /// Clears the memory
         /// </summary>
-        public void NonMaskableInterrupt()
+
+        /// <summary>
+        /// Returns the byte at the given address.
+        /// </summary>
+        /// <param name="address">The address to return</param>
+        /// <returns>the byte being returned</returns>
+        public virtual byte ReadMemoryValue(int address)
         {
-            ProgramCounter--;
-            BreakOperation(false, 0xFFFA);
-            CurrentOpCode = _core.ReadMemory(ProgramCounter);
-//#if DEBUG
-//            SetDisassembly();
-//#endif
+            var value = _core.ReadMemory(address);
+            IncrementCycleCount();
+            return value;
         }
+
+        /// <summary>
+        /// Returns the byte at a given address without incrementing the cycle. Useful for test harness. 
+        /// </summary>
+        /// <param name="address"></param>
+        /// <returns></returns>
+        public virtual byte ReadMemoryValueWithoutCycle(int address)
+        {
+            var value = _core.ReadMemory(address); 
+            return value;
+        }
+
+        /// <summary>
+        /// Writes data to the given address.
+        /// </summary>
+        /// <param name="address">The address to write data to</param>
+        /// <param name="data">The data to write</param>
+        public virtual void WriteMemoryValue(int address, byte data)
+        {
+            IncrementCycleCount();
+            _core.WriteMemory(address, data);
+        }
+
+        /// <summary>
+        /// Gets the Number of Cycles that have elapsed
+        /// </summary>
+        /// <returns>The number of elapsed cycles</returns>
+	    public int GetCycleCount()
+        {
+            return _cycleCount;
+        }
+
+        /// <summary>
+        /// Increments the Cycle Count, causes a CycleCountIncrementedAction to fire.
+        /// </summary>
+        protected void IncrementCycleCount()
+        {
+            _cycleCount++;
+            _cycleCountStep++;
+            CycleCountIncrementedAction();
+
+            _previousInterrupt = _interrupt;
+            _interrupt = TriggerNmi || (TriggerIRQ && !DisableInterruptFlag);
+        }
+
+        /// <summary>
+        /// Resets the Cycle Count back to 0
+        /// </summary>
+	    public void ResetCycleCount()
+        {
+            _cycleCount = 0;
+        }
+
+        /// <summary>
+        /// Dumps the entire memory object. Used when saving the memory state
+        /// </summary>
+        /// <returns></returns>
+
         #endregion
 
         #region Private Methods
@@ -219,132 +308,100 @@ namespace pNes
             switch (CurrentOpCode)
             {
                 #region Add / Subtract Operations
-                //STA Store Accumulator In Memory, Immediate, 2 Bytes, 2 Cycles
+                //ADC Add With Carry, Immediate, 2 Bytes, 2 Cycles
                 case 0x69:
                     {
                         AddWithCarryOperation(AddressingMode.Immediate);
-                        IncrementProgramCounter(2);
-                        NumberofCyclesLeft += 2;
                         break;
                     }
-                //STA Store Accumulator In Memory, Zero Page, 2 Bytes, 3 Cycles
+                //ADC Add With Carry, Zero Page, 2 Bytes, 3 Cycles
                 case 0x65:
                     {
                         AddWithCarryOperation(AddressingMode.ZeroPage);
-                        NumberofCyclesLeft += 3;
-                        IncrementProgramCounter(2);
                         break;
                     }
-                //STA Store Accumulator In Memory, Zero Page X, 2 Bytes, 4 Cycles
+                //ADC Add With Carry, Zero Page X, 2 Bytes, 4 Cycles
                 case 0x75:
                     {
                         AddWithCarryOperation(AddressingMode.ZeroPageX);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(2);
                         break;
                     }
-                //STA Store Accumulator In Memory, Absolute, 3 Bytes, 4 Cycles
+                //ADC Add With Carry, Absolute, 3 Bytes, 4 Cycles
                 case 0x6D:
                     {
                         AddWithCarryOperation(AddressingMode.Absolute);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
-                //STA Store Accumulator In Memory, Absolute X, 3 Bytes, 4+ Cycles
+                //ADC Add With Carry, Absolute X, 3 Bytes, 4+ Cycles
                 case 0x7D:
                     {
                         AddWithCarryOperation(AddressingMode.AbsoluteX);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
-                //STA Store Accumulator In Memory, Absolute Y, 3 Bytes, 4+ Cycles
+                //ADC Add With Carry, Absolute Y, 3 Bytes, 4+ Cycles
                 case 0x79:
                     {
                         AddWithCarryOperation(AddressingMode.AbsoluteY);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
-                //STA Store Accumulator In Memory, Indexed Indirect, 2 Bytes, 6 Cycles
+                //ADC Add With Carry, Indexed Indirect, 2 Bytes, 6 Cycles
                 case 0x61:
                     {
                         AddWithCarryOperation(AddressingMode.IndirectX);
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(2);
                         break;
                     }
-                //STA Store Accumulator In Memory, Indexed Indirect, 2 Bytes, 5+ Cycles
+                //ADC Add With Carry, Indexed Indirect, 2 Bytes, 5+ Cycles
                 case 0x71:
                     {
                         AddWithCarryOperation(AddressingMode.IndirectY);
-                        NumberofCyclesLeft += 5;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //SBC Subtract with Borrow, Immediate, 2 Bytes, 2 Cycles
                 case 0xE9:
                     {
                         SubtractWithBorrowOperation(AddressingMode.Immediate);
-                        IncrementProgramCounter(2);
-                        NumberofCyclesLeft += 2;
                         break;
                     }
                 //SBC Subtract with Borrow, Zero Page, 2 Bytes, 3 Cycles
                 case 0xE5:
                     {
                         SubtractWithBorrowOperation(AddressingMode.ZeroPage);
-                        NumberofCyclesLeft += 3;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //SBC Subtract with Borrow, Zero Page X, 2 Bytes, 4 Cycles
                 case 0xF5:
                     {
                         SubtractWithBorrowOperation(AddressingMode.ZeroPageX);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //SBC Subtract with Borrow, Absolute, 3 Bytes, 4 Cycles
                 case 0xED:
                     {
                         SubtractWithBorrowOperation(AddressingMode.Absolute);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //SBC Subtract with Borrow, Absolute X, 3 Bytes, 4+ Cycles
                 case 0xFD:
                     {
                         SubtractWithBorrowOperation(AddressingMode.AbsoluteX);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //SBC Subtract with Borrow, Absolute Y, 3 Bytes, 4+ Cycles
                 case 0xF9:
                     {
                         SubtractWithBorrowOperation(AddressingMode.AbsoluteY);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //SBC Subtract with Borrow, Indexed Indirect, 2 Bytes, 6 Cycles
                 case 0xE1:
                     {
                         SubtractWithBorrowOperation(AddressingMode.IndirectX);
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //SBC Subtract with Borrow, Indexed Indirect, 2 Bytes, 5+ Cycles
                 case 0xF1:
                     {
                         SubtractWithBorrowOperation(AddressingMode.IndirectY);
-                        NumberofCyclesLeft += 5;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 #endregion
@@ -353,9 +410,7 @@ namespace pNes
                 //BCC Branch if Carry is Clear, Relative, 2 Bytes, 2++ Cycles
                 case 0x90:
                     {
-
                         BranchOperation(!CarryFlag);
-                        NumberofCyclesLeft += 2;
                         break;
 
                     }
@@ -363,14 +418,12 @@ namespace pNes
                 case 0xB0:
                     {
                         BranchOperation(CarryFlag);
-                        NumberofCyclesLeft += 2;
                         break;
                     }
                 //BEQ Branch if Zero is Set, Relative, 2 Bytes, 2++ Cycles
                 case 0xF0:
                     {
                         BranchOperation(ZeroFlag);
-                        NumberofCyclesLeft += 2;
                         break;
                     }
 
@@ -378,35 +431,30 @@ namespace pNes
                 case 0x30:
                     {
                         BranchOperation(NegativeFlag);
-                        NumberofCyclesLeft += 2;
                         break;
                     }
                 //BNE Branch if Zero is Not Set, Relative, 2 Bytes, 2++ Cycles
                 case 0xD0:
                     {
                         BranchOperation(!ZeroFlag);
-                        NumberofCyclesLeft += 2;
                         break;
                     }
                 // BPL Branch if Negative Clear, 2 Bytes, 2++ Cycles
                 case 0x10:
                     {
                         BranchOperation(!NegativeFlag);
-                        NumberofCyclesLeft += 2;
                         break;
                     }
                 // BVC Branch if Overflow Clear, 2 Bytes, 2++ Cycles
                 case 0x50:
                     {
                         BranchOperation(!OverflowFlag);
-                        NumberofCyclesLeft += 2;
                         break;
                     }
                 // BVS Branch if Overflow Set, 2 Bytes, 2++ Cycles
                 case 0x70:
                     {
                         BranchOperation(OverflowFlag);
-                        NumberofCyclesLeft += 2;
                         break;
                     }
                 #endregion
@@ -416,208 +464,156 @@ namespace pNes
                 case 0x29:
                     {
                         AndOperation(AddressingMode.Immediate);
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(2);
                         break;
                     }
-                //AND Compare Memory with Accumulator, Zero Page, 2 Bytes, 2 Cycles
+                //AND Compare Memory with Accumulator, Zero Page, 2 Bytes, 3 Cycles
                 case 0x25:
                     {
                         AndOperation(AddressingMode.ZeroPage);
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //AND Compare Memory with Accumulator, Zero PageX, 2 Bytes, 3 Cycles
                 case 0x35:
                     {
                         AndOperation(AddressingMode.ZeroPageX);
-                        NumberofCyclesLeft += 3;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //AND Compare Memory with Accumulator, Absolute,  3 Bytes, 4 Cycles
                 case 0x2D:
                     {
                         AndOperation(AddressingMode.Absolute);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //AND Compare Memory with Accumulator, AbsolueteX 3 Bytes, 4+ Cycles
                 case 0x3D:
                     {
                         AndOperation(AddressingMode.AbsoluteX);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //AND Compare Memory with Accumulator, AbsoluteY, 3 Bytes, 4+ Cycles
                 case 0x39:
                     {
                         AndOperation(AddressingMode.AbsoluteY);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //AND Compare Memory with Accumulator, IndexedIndirect, 2 Bytes, 6 Cycles
                 case 0x21:
                     {
                         AndOperation(AddressingMode.IndirectX);
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //AND Compare Memory with Accumulator, IndirectIndexed, 2 Bytes, 5 Cycles
                 case 0x31:
                     {
                         AndOperation(AddressingMode.IndirectY);
-                        NumberofCyclesLeft += 5;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //BIT Compare Memory with Accumulator, Zero Page, 2 Bytes, 3 Cycles
                 case 0x24:
                     {
                         BitOperation(AddressingMode.ZeroPage);
-                        IncrementProgramCounter(2);
-                        NumberofCyclesLeft += 3;
                         break;
                     }
                 //BIT Compare Memory with Accumulator, Absolute, 2 Bytes, 4 Cycles
                 case 0x2C:
                     {
                         BitOperation(AddressingMode.Absolute);
-                        IncrementProgramCounter(3);
-                        NumberofCyclesLeft += 4;
                         break;
                     }
                 //EOR Exclusive OR Memory with Accumulator, Immediate, 2 Bytes, 2 Cycles
                 case 0x49:
                     {
                         EorOperation(AddressingMode.Immediate);
-                        IncrementProgramCounter(2);
-                        NumberofCyclesLeft += 2;
                         break;
                     }
                 //EOR Exclusive OR Memory with Accumulator, Zero Page, 2 Bytes, 3 Cycles
                 case 0x45:
                     {
                         EorOperation(AddressingMode.ZeroPage);
-                        IncrementProgramCounter(2);
-                        NumberofCyclesLeft += 3;
                         break;
                     }
                 //EOR Exclusive OR Memory with Accumulator, Zero Page X, 2 Bytes, 4 Cycles
                 case 0x55:
                     {
                         EorOperation(AddressingMode.ZeroPageX);
-                        IncrementProgramCounter(2);
-                        NumberofCyclesLeft += 4;
                         break;
                     }
                 //EOR Exclusive OR Memory with Accumulator, Absolute, 3 Bytes, 4 Cycles
                 case 0x4D:
                     {
                         EorOperation(AddressingMode.Absolute);
-                        IncrementProgramCounter(3);
-                        NumberofCyclesLeft += 4;
                         break;
                     }
                 //EOR Exclusive OR Memory with Accumulator, Absolute X, 3 Bytes, 4+ Cycles
                 case 0x5D:
                     {
                         EorOperation(AddressingMode.AbsoluteX);
-                        IncrementProgramCounter(3);
-                        NumberofCyclesLeft += 4;
                         break;
                     }
                 //EOR Exclusive OR Memory with Accumulator, Absolute Y, 3 Bytes, 4+ Cycles
                 case 0x59:
                     {
                         EorOperation(AddressingMode.AbsoluteY);
-                        IncrementProgramCounter(3);
-                        NumberofCyclesLeft += 4;
                         break;
                     }
                 //EOR Exclusive OR Memory with Accumulator, IndexedIndirect, 2 Bytes 6 Cycles
                 case 0x41:
                     {
                         EorOperation(AddressingMode.IndirectX);
-                        IncrementProgramCounter(2);
-                        NumberofCyclesLeft += 6;
                         break;
                     }
                 //EOR Exclusive OR Memory with Accumulator, IndirectIndexed, 2 Bytes 5 Cycles
                 case 0x51:
                     {
                         EorOperation(AddressingMode.IndirectY);
-                        IncrementProgramCounter(2);
-                        NumberofCyclesLeft += 5;
                         break;
                     }
                 //ORA Compare Memory with Accumulator, Immediate, 2 Bytes, 2 Cycles
                 case 0x09:
                     {
                         OrOperation(AddressingMode.Immediate);
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //ORA Compare Memory with Accumulator, Zero Page, 2 Bytes, 2 Cycles
                 case 0x05:
                     {
                         OrOperation(AddressingMode.ZeroPage);
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(2);
                         break;
                     }
-                //ORA Compare Memory with Accumulator, Zero PageX, 2 Bytes, 3 Cycles
+                //ORA Compare Memory with Accumulator, Zero PageX, 2 Bytes, 4 Cycles
                 case 0x15:
                     {
                         OrOperation(AddressingMode.ZeroPageX);
-                        NumberofCyclesLeft += 3;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //ORA Compare Memory with Accumulator, Absolute,  3 Bytes, 4 Cycles
                 case 0x0D:
                     {
                         OrOperation(AddressingMode.Absolute);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //ORA Compare Memory with Accumulator, AbsolueteX 3 Bytes, 4+ Cycles
                 case 0x1D:
                     {
                         OrOperation(AddressingMode.AbsoluteX);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //ORA Compare Memory with Accumulator, AbsoluteY, 3 Bytes, 4+ Cycles
                 case 0x19:
                     {
                         OrOperation(AddressingMode.AbsoluteY);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //ORA Compare Memory with Accumulator, IndexedIndirect, 2 Bytes, 6 Cycles
                 case 0x01:
                     {
                         OrOperation(AddressingMode.IndirectX);
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //ORA Compare Memory with Accumulator, IndirectIndexed, 2 Bytes, 5 Cycles
                 case 0x11:
                     {
                         OrOperation(AddressingMode.IndirectY);
-                        NumberofCyclesLeft += 5;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 #endregion
@@ -627,16 +623,14 @@ namespace pNes
                 case 0x18:
                     {
                         CarryFlag = false;
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
+                        IncrementCycleCount();
                         break;
                     }
                 //CLD Clear Decimal Flag, Implied, 1 Byte, 2 Cycles
                 case 0xD8:
                     {
                         DecimalFlag = false;
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
+                        IncrementCycleCount();
                         break;
 
                     }
@@ -644,8 +638,7 @@ namespace pNes
                 case 0x58:
                     {
                         DisableInterruptFlag = false;
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
+                        IncrementCycleCount();
                         break;
 
                     }
@@ -653,8 +646,7 @@ namespace pNes
                 case 0xB8:
                     {
                         OverflowFlag = false;
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
+                        IncrementCycleCount();
                         break;
                     }
 
@@ -665,112 +657,84 @@ namespace pNes
                 case 0xC9:
                     {
                         CompareOperation(AddressingMode.Immediate, Accumulator);
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //CMP Compare Accumulator with Memory, Zero Page, 2 Bytes, 3 Cycles
                 case 0xC5:
                     {
                         CompareOperation(AddressingMode.ZeroPage, Accumulator);
-                        NumberofCyclesLeft += 3;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //CMP Compare Accumulator with Memory, Zero Page x, 2 Bytes, 4 Cycles
                 case 0xD5:
                     {
                         CompareOperation(AddressingMode.ZeroPageX, Accumulator);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //CMP Compare Accumulator with Memory, Absolute, 3 Bytes, 4 Cycles
                 case 0xCD:
                     {
                         CompareOperation(AddressingMode.Absolute, Accumulator);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //CMP Compare Accumulator with Memory, Absolute X, 2 Bytes, 4 Cycles
                 case 0xDD:
                     {
                         CompareOperation(AddressingMode.AbsoluteX, Accumulator);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //CMP Compare Accumulator with Memory, Absolute Y, 2 Bytes, 4 Cycles
                 case 0xD9:
                     {
                         CompareOperation(AddressingMode.AbsoluteY, Accumulator);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //CMP Compare Accumulator with Memory, Indirect X, 2 Bytes, 6 Cycles
                 case 0xC1:
                     {
                         CompareOperation(AddressingMode.IndirectX, Accumulator);
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //CMP Compare Accumulator with Memory, Indirect Y, 2 Bytes, 5 Cycles
                 case 0xD1:
                     {
                         CompareOperation(AddressingMode.IndirectY, Accumulator);
-                        NumberofCyclesLeft += 5;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //CPX Compare Accumulator with X Register, Immediate, 2 Bytes, 2 Cycles
                 case 0xE0:
                     {
                         CompareOperation(AddressingMode.Immediate, XRegister);
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //CPX Compare Accumulator with X Register, Zero Page, 2 Bytes, 3 Cycles
                 case 0xE4:
                     {
                         CompareOperation(AddressingMode.ZeroPage, XRegister);
-                        NumberofCyclesLeft += 3;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //CPX Compare Accumulator with X Register, Absolute, 3 Bytes, 4 Cycles
                 case 0xEC:
                     {
                         CompareOperation(AddressingMode.Absolute, XRegister);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //CPY Compare Accumulator with Y Register, Immediate, 2 Bytes, 2 Cycles
                 case 0xC0:
                     {
                         CompareOperation(AddressingMode.Immediate, YRegister);
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //CPY Compare Accumulator with Y Register, Zero Page, 2 Bytes, 3 Cycles
                 case 0xC4:
                     {
                         CompareOperation(AddressingMode.ZeroPage, YRegister);
-                        NumberofCyclesLeft += 3;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //CPY Compare Accumulator with Y Register, Absolute, 3 Bytes, 4 Cycles
                 case 0xCC:
                     {
                         CompareOperation(AddressingMode.Absolute, YRegister);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 #endregion
@@ -780,108 +744,74 @@ namespace pNes
                 case 0xC6:
                     {
                         ChangeMemoryByOne(AddressingMode.ZeroPage, true);
-
-                        NumberofCyclesLeft += 5;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //DEC Decrement Memory by One, Zero Page X, 2 Bytes, 6 Cycles
                 case 0xD6:
                     {
                         ChangeMemoryByOne(AddressingMode.ZeroPageX, true);
-
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //DEC Decrement Memory by One, Absolute, 3 Bytes, 6 Cycles
                 case 0xCE:
                     {
                         ChangeMemoryByOne(AddressingMode.Absolute, true);
-
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(3);
                         break;
                     }
-                //DEC Decrement Memory by One, Implied, 3 Bytes, 7 Cycles
+                //DEC Decrement Memory by One, Absolute X, 3 Bytes, 7 Cycles
                 case 0xDE:
                     {
                         ChangeMemoryByOne(AddressingMode.AbsoluteX, true);
-
-                        NumberofCyclesLeft += 7;
-                        IncrementProgramCounter(3);
+                        IncrementCycleCount();
                         break;
                     }
                 //DEX Decrement X Register by One, Implied, 1 Bytes, 2 Cycles
                 case 0xCA:
                     {
                         ChangeRegisterByOne(true, true);
-
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
                         break;
                     }
                 //DEY Decrement Y Register by One, Implied, 1 Bytes, 2 Cycles
                 case 0x88:
                     {
                         ChangeRegisterByOne(false, true);
-
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
                         break;
                     }
                 //INC Increment Memory by One, Zero Page, 2 Bytes, 5 Cycles
                 case 0xE6:
                     {
                         ChangeMemoryByOne(AddressingMode.ZeroPage, false);
-
-                        NumberofCyclesLeft += 5;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //INC Increment Memory by One, Zero Page X, 2 Bytes, 6 Cycles
                 case 0xF6:
                     {
                         ChangeMemoryByOne(AddressingMode.ZeroPageX, false);
-
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //INC Increment Memory by One, Absolute, 3 Bytes, 6 Cycles
                 case 0xEE:
                     {
                         ChangeMemoryByOne(AddressingMode.Absolute, false);
-
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //INC Increment Memory by One, Absolute X, 3 Bytes, 7 Cycles
                 case 0xFE:
                     {
                         ChangeMemoryByOne(AddressingMode.AbsoluteX, false);
-
-                        NumberofCyclesLeft += 7;
-                        IncrementProgramCounter(3);
+                        IncrementCycleCount();
                         break;
                     }
                 //INX Increment X Register by One, Implied, 1 Bytes, 2 Cycles
                 case 0xE8:
                     {
                         ChangeRegisterByOne(true, false);
-
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
                         break;
                     }
                 //INY Increment Y Register by One, Implied, 1 Bytes, 2 Cycles
                 case 0xC8:
                     {
                         ChangeRegisterByOne(false, false);
-
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
                         break;
                     }
                 #endregion
@@ -891,55 +821,51 @@ namespace pNes
                 case 0x4C:
                     {
                         ProgramCounter = GetAddressByAddressingMode(AddressingMode.Absolute);
-                        NumberofCyclesLeft += 3;
                         break;
                     }
                 //JMP Jump to New Location, Indirect 3 Bytes, 5 Cycles
                 case 0x6C:
                     {
+                        ProgramCounter = GetAddressByAddressingMode(AddressingMode.Absolute);
 
-                        //ProgramCounter = GetAddressByAddressingMode(AddressingMode.Absolute);
-                        //ProgramCounter = GetAddressByAddressingMode(AddressingMode.Absolute);
-                        int lowByte = _core.ReadMemory(ProgramCounter);
-                        int hihgByte = _core.ReadMemory(ProgramCounter + 1);
-                        int value = (lowByte | (hihgByte << 8)) & 0xFFFF;
-                        
-                        int effL = _core.ReadMemory(value);
-                        int effH = _core.ReadMemory((value & 0xFF00) + ((value + 1) & 0x00FF));
-                        ProgramCounter = effL + (0x100 * effH);
-                        NumberofCyclesLeft += 5;
+                        if ((ProgramCounter & 0xFF) == 0xFF)
+                        {
+                            //Get the first half of the address
+                            int address = ReadMemoryValue(ProgramCounter);
+
+                            //Get the second half of the address, due to the issue with page boundary it reads from the wrong location!
+                            address += 256 * ReadMemoryValue(ProgramCounter - 255);
+                            ProgramCounter = address;
+                        }
+                        else
+                        {
+                            ProgramCounter = GetAddressByAddressingMode(AddressingMode.Absolute);
+                        }
+
                         break;
                     }
                 //JSR Jump to SubRoutine, Absolute, 3 Bytes, 6 Cycles
                 case 0x20:
                     {
                         JumpToSubRoutineOperation();
-
-                        NumberofCyclesLeft += 6;
                         break;
                     }
                 //BRK Simulate IRQ, Implied, 1 Byte, 7 Cycles
                 case 0x00:
                     {
                         BreakOperation(true, 0xFFFE);
-
-                        NumberofCyclesLeft += 7;
                         break;
                     }
                 //RTI Return From Interrupt, Implied, 1 Byte, 6 Cycles
                 case 0x40:
                     {
                         ReturnFromInterruptOperation();
-
-                        NumberofCyclesLeft += 6;
                         break;
                     }
                 //RTS Return From Subroutine, Implied, 1 Byte, 6 Cycles
                 case 0x60:
                     {
                         ReturnFromSubRoutineOperation();
-
-                        NumberofCyclesLeft += 6;
                         break;
                     }
                 #endregion
@@ -948,200 +874,145 @@ namespace pNes
                 //LDA Load Accumulator with Memory, Immediate, 2 Bytes, 2 Cycles
                 case 0xA9:
                     {
-
-                        Accumulator = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.Immediate));
+                        Accumulator = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.Immediate));
                         SetZeroFlag(Accumulator);
                         SetNegativeFlag(Accumulator);
-
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //LDA Load Accumulator with Memory, Zero Page, 2 Bytes, 3 Cycles
                 case 0xA5:
                     {
-                        Accumulator = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.ZeroPage));
+                        Accumulator = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.ZeroPage));
                         SetZeroFlag(Accumulator);
                         SetNegativeFlag(Accumulator);
-
-                        NumberofCyclesLeft += 3;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //LDA Load Accumulator with Memory, Zero Page X, 2 Bytes, 4 Cycles
                 case 0xB5:
                     {
-                        Accumulator = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.ZeroPageX));
+                        Accumulator = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.ZeroPageX));
                         SetZeroFlag(Accumulator);
                         SetNegativeFlag(Accumulator);
-
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //LDA Load Accumulator with Memory, Absolute, 3 Bytes, 4 Cycles
                 case 0xAD:
                     {
-                        Accumulator = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.Absolute));
+                        Accumulator = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.Absolute));
                         SetZeroFlag(Accumulator);
                         SetNegativeFlag(Accumulator);
-
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //LDA Load Accumulator with Memory, Absolute X, 3 Bytes, 4+ Cycles
                 case 0xBD:
                     {
-                        Accumulator = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.AbsoluteX));
+                        Accumulator = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.AbsoluteX));
                         SetZeroFlag(Accumulator);
                         SetNegativeFlag(Accumulator);
-
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //LDA Load Accumulator with Memory, Absolute Y, 3 Bytes, 4+ Cycles
                 case 0xB9:
                     {
-                        Accumulator = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.AbsoluteY));
+                        Accumulator = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.AbsoluteY));
                         SetZeroFlag(Accumulator);
                         SetNegativeFlag(Accumulator);
-
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //LDA Load Accumulator with Memory, Index Indirect, 2 Bytes, 6 Cycles
                 case 0xA1:
                     {
-                        Accumulator = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.IndirectX));
+                        Accumulator = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.IndirectX));
                         SetZeroFlag(Accumulator);
                         SetNegativeFlag(Accumulator);
-
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //LDA Load Accumulator with Memory, Indirect Index, 2 Bytes, 5+ Cycles
                 case 0xB1:
                     {
-                        Accumulator = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.IndirectY));
+                        Accumulator = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.IndirectY));
                         SetZeroFlag(Accumulator);
                         SetNegativeFlag(Accumulator);
-
-                        NumberofCyclesLeft += 5;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //LDX Load X with memory, Immediate, 2 Bytes, 2 Cycles
                 case 0xA2:
                     {
-                        XRegister = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.Immediate));
+                        XRegister = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.Immediate));
                         SetZeroFlag(XRegister);
                         SetNegativeFlag(XRegister);
-
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //LDX Load X with memory, Zero Page, 2 Bytes, 3 Cycles
                 case 0xA6:
                     {
-                        XRegister = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.ZeroPage));
+                        XRegister = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.ZeroPage));
                         SetZeroFlag(XRegister);
                         SetNegativeFlag(XRegister);
-
-                        NumberofCyclesLeft += 3;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //LDX Load X with memory, Zero Page Y, 2 Bytes, 4 Cycles
                 case 0xB6:
                     {
-                        XRegister = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.ZeroPageY));
+                        XRegister = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.ZeroPageY));
                         SetZeroFlag(XRegister);
                         SetNegativeFlag(XRegister);
-
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //LDX Load X with memory, Absolute, 3 Bytes, 4 Cycles
                 case 0xAE:
                     {
-                        XRegister = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.Absolute));
+                        XRegister = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.Absolute));
                         SetZeroFlag(XRegister);
                         SetNegativeFlag(XRegister);
-
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //LDX Load X with memory, Absolute Y, 3 Bytes, 4+ Cycles
                 case 0xBE:
                     {
-                        XRegister = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.AbsoluteY));
+                        XRegister = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.AbsoluteY));
                         SetZeroFlag(XRegister);
                         SetNegativeFlag(XRegister);
-
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //LDY Load Y with memory, Immediate, 2 Bytes, 2 Cycles
                 case 0xA0:
                     {
-                        YRegister = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.Immediate));
+                        YRegister = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.Immediate));
                         SetZeroFlag(YRegister);
                         SetNegativeFlag(YRegister);
-
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //LDY Load Y with memory, Zero Page, 2 Bytes, 3 Cycles
                 case 0xA4:
                     {
-                        YRegister = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.ZeroPage));
+                        YRegister = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.ZeroPage));
                         SetZeroFlag(YRegister);
                         SetNegativeFlag(YRegister);
-
-                        NumberofCyclesLeft += 3;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //LDY Load Y with memory, Zero Page X, 2 Bytes, 4 Cycles
                 case 0xB4:
                     {
-                        YRegister = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.ZeroPageX));
+                        YRegister = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.ZeroPageX));
                         SetZeroFlag(YRegister);
                         SetNegativeFlag(YRegister);
-
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //LDY Load Y with memory, Absolute, 3 Bytes, 4 Cycles
                 case 0xAC:
                     {
-                        YRegister = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.Absolute));
+                        YRegister = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.Absolute));
                         SetZeroFlag(YRegister);
                         SetNegativeFlag(YRegister);
-
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //LDY Load Y with memory, Absolue X, 3 Bytes, 4+ Cycles
                 case 0xBC:
                     {
-                        YRegister = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.AbsoluteX));
+                        YRegister = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.AbsoluteX));
                         SetZeroFlag(YRegister);
                         SetNegativeFlag(YRegister);
-
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 #endregion
@@ -1150,45 +1021,49 @@ namespace pNes
                 //PHA Push Accumulator onto Stack, Implied, 1 Byte, 3 Cycles
                 case 0x48:
                     {
+                        ReadMemoryValue(ProgramCounter + 1);
+
                         PokeStack((byte)Accumulator);
                         StackPointer--;
-
-                        NumberofCyclesLeft += 3;
-                        IncrementProgramCounter(1);
+                        IncrementCycleCount();
                         break;
 
                     }
                 //PHP Push Flags onto Stack, Implied, 1 Byte, 3 Cycles
                 case 0x08:
                     {
+                        ReadMemoryValue(ProgramCounter + 1);
+
                         PushFlagsOperation();
                         StackPointer--;
-
-                        NumberofCyclesLeft += 3;
-                        IncrementProgramCounter(1);
+                        IncrementCycleCount();
                         break;
                     }
                 //PLA Pull Accumulator from Stack, Implied, 1 Byte, 4 Cycles
                 case 0x68:
                     {
+                        ReadMemoryValue(ProgramCounter + 1);
                         StackPointer++;
-                        Accumulator = PeekStack();
+                        IncrementCycleCount();
 
+                        Accumulator = PeekStack();
                         SetNegativeFlag(Accumulator);
                         SetZeroFlag(Accumulator);
 
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(1);
+                        IncrementCycleCount();
                         break;
                     }
                 //PLP Pull Flags from Stack, Implied, 1 Byte, 4 Cycles
                 case 0x28:
                     {
+                        ReadMemoryValue(ProgramCounter + 1);
+
                         StackPointer++;
+                        IncrementCycleCount();
+
                         PullFlagsOperation();
 
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(1);
+                        IncrementCycleCount();
                         break;
                     }
                 //TSX Transfer Stack Pointer to X Register, 1 Bytes, 2 Cycles
@@ -1198,18 +1073,14 @@ namespace pNes
 
                         SetNegativeFlag(XRegister);
                         SetZeroFlag(XRegister);
-
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
+                        IncrementCycleCount();
                         break;
                     }
                 //TXS Transfer X Register to Stack Pointer, 1 Bytes, 2 Cycles
                 case 0x9A:
                     {
                         StackPointer = (byte)XRegister;
-
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
+                        IncrementCycleCount();
                         break;
                     }
                 #endregion
@@ -1219,24 +1090,21 @@ namespace pNes
                 case 0x38:
                     {
                         CarryFlag = true;
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
+                        IncrementCycleCount();
                         break;
                     }
                 //SED Set Interrupt, Implied, 1 Bytes, 2 Cycles
                 case 0xF8:
                     {
                         DecimalFlag = true;
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
+                        IncrementCycleCount();
                         break;
                     }
                 //SEI Set Interrupt, Implied, 1 Bytes, 2 Cycles
                 case 0x78:
                     {
                         DisableInterruptFlag = true;
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
+                        IncrementCycleCount();
                         break;
                     }
                 #endregion
@@ -1246,160 +1114,124 @@ namespace pNes
                 case 0x0A:
                     {
                         AslOperation(AddressingMode.Accumulator);
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
                         break;
                     }
                 //ASL Shift Left 1 Bit Memory or Accumulator, Zero Page, 2 Bytes, 5 Cycles
                 case 0x06:
                     {
                         AslOperation(AddressingMode.ZeroPage);
-                        NumberofCyclesLeft += 5;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //ASL Shift Left 1 Bit Memory or Accumulator, Zero PageX, 2 Bytes, 6 Cycles
                 case 0x16:
                     {
                         AslOperation(AddressingMode.ZeroPageX);
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //ASL Shift Left 1 Bit Memory or Accumulator, Absolute, 3 Bytes, 6 Cycles
                 case 0x0E:
                     {
                         AslOperation(AddressingMode.Absolute);
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //ASL Shift Left 1 Bit Memory or Accumulator, AbsoluteX, 3 Bytes, 7 Cycles
                 case 0x1E:
                     {
                         AslOperation(AddressingMode.AbsoluteX);
-                        NumberofCyclesLeft += 7;
-                        IncrementProgramCounter(3);
+                        IncrementCycleCount();
                         break;
                     }
                 //LSR Shift Left 1 Bit Memory or Accumulator, Accumulator, 1 Bytes, 2 Cycles
                 case 0x4A:
                     {
                         LsrOperation(AddressingMode.Accumulator);
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
                         break;
                     }
                 //LSR Shift Left 1 Bit Memory or Accumulator, Zero Page, 2 Bytes, 5 Cycles
                 case 0x46:
                     {
                         LsrOperation(AddressingMode.ZeroPage);
-                        NumberofCyclesLeft += 5;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //LSR Shift Left 1 Bit Memory or Accumulator, Zero PageX, 2 Bytes, 6 Cycles
                 case 0x56:
                     {
                         LsrOperation(AddressingMode.ZeroPageX);
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //LSR Shift Left 1 Bit Memory or Accumulator, Absolute, 3 Bytes, 6 Cycles
                 case 0x4E:
                     {
                         LsrOperation(AddressingMode.Absolute);
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //LSR Shift Left 1 Bit Memory or Accumulator, AbsoluteX, 3 Bytes, 7 Cycles
                 case 0x5E:
                     {
                         LsrOperation(AddressingMode.AbsoluteX);
-                        NumberofCyclesLeft += 7;
-                        IncrementProgramCounter(3);
+                        IncrementCycleCount();
                         break;
                     }
                 //ROL Rotate Left 1 Bit Memory or Accumulator, Accumulator, 1 Bytes, 2 Cycles
                 case 0x2A:
                     {
                         RolOperation(AddressingMode.Accumulator);
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
                         break;
                     }
                 //ROL Rotate Left 1 Bit Memory or Accumulator, Zero Page, 2 Bytes, 5 Cycles
                 case 0x26:
                     {
                         RolOperation(AddressingMode.ZeroPage);
-                        NumberofCyclesLeft += 5;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //ROL Rotate Left 1 Bit Memory or Accumulator, Zero PageX, 2 Bytes, 6 Cycles
                 case 0x36:
                     {
                         RolOperation(AddressingMode.ZeroPageX);
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //ROL Rotate Left 1 Bit Memory or Accumulator, Absolute, 3 Bytes, 6 Cycles
                 case 0x2E:
                     {
                         RolOperation(AddressingMode.Absolute);
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //ROL Rotate Left 1 Bit Memory or Accumulator, AbsoluteX, 3 Bytes, 7 Cycles
                 case 0x3E:
                     {
                         RolOperation(AddressingMode.AbsoluteX);
-                        NumberofCyclesLeft += 7;
-                        IncrementProgramCounter(3);
+                        IncrementCycleCount();
                         break;
                     }
                 //ROR Rotate Right 1 Bit Memory or Accumulator, Accumulator, 1 Bytes, 2 Cycles
                 case 0x6A:
                     {
                         RorOperation(AddressingMode.Accumulator);
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
                         break;
                     }
                 //ROR Rotate Right 1 Bit Memory or Accumulator, Zero Page, 2 Bytes, 5 Cycles
                 case 0x66:
                     {
                         RorOperation(AddressingMode.ZeroPage);
-                        NumberofCyclesLeft += 5;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //ROR Rotate Right 1 Bit Memory or Accumulator, Zero PageX, 2 Bytes, 6 Cycles
                 case 0x76:
                     {
                         RorOperation(AddressingMode.ZeroPageX);
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(2);
                         break;
                     }
                 //ROR Rotate Right 1 Bit Memory or Accumulator, Absolute, 3 Bytes, 6 Cycles
                 case 0x6E:
                     {
                         RorOperation(AddressingMode.Absolute);
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(3);
                         break;
                     }
                 //ROR Rotate Right 1 Bit Memory or Accumulator, AbsoluteX, 3 Bytes, 7 Cycles
                 case 0x7E:
                     {
                         RorOperation(AddressingMode.AbsoluteX);
-                        NumberofCyclesLeft += 7;
-                        IncrementProgramCounter(3);
+                        IncrementCycleCount();
                         break;
                     }
                 #endregion
@@ -1408,105 +1240,82 @@ namespace pNes
                 //STA Store Accumulator In Memory, Zero Page, 2 Bytes, 3 Cycles
                 case 0x85:
                     {
-                        _core.WriteMemory(GetAddressByAddressingMode(AddressingMode.ZeroPage), (byte)Accumulator);
-                        IncrementProgramCounter(2);
-                        NumberofCyclesLeft += 3;
+                        WriteMemoryValue(GetAddressByAddressingMode(AddressingMode.ZeroPage), (byte)Accumulator);
                         break;
                     }
                 //STA Store Accumulator In Memory, Zero Page X, 2 Bytes, 4 Cycles
                 case 0x95:
                     {
-                        _core.WriteMemory(GetAddressByAddressingMode(AddressingMode.ZeroPageX), (byte)Accumulator);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(2);
+                        WriteMemoryValue(GetAddressByAddressingMode(AddressingMode.ZeroPageX), (byte)Accumulator);
                         break;
                     }
                 //STA Store Accumulator In Memory, Absolute, 3 Bytes, 4 Cycles
                 case 0x8D:
                     {
-                        _core.WriteMemory(GetAddressByAddressingMode(AddressingMode.Absolute), (byte)Accumulator);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
+                        WriteMemoryValue(GetAddressByAddressingMode(AddressingMode.Absolute), (byte)Accumulator);
                         break;
                     }
                 //STA Store Accumulator In Memory, Absolute X, 3 Bytes, 5 Cycles
                 case 0x9D:
                     {
-                        _core.WriteMemory(GetAddressByAddressingMode(AddressingMode.AbsoluteX), (byte)Accumulator);
-                        NumberofCyclesLeft += 5;
-                        IncrementProgramCounter(3);
+                        WriteMemoryValue(GetAddressByAddressingMode(AddressingMode.AbsoluteX), (byte)Accumulator);
+                        IncrementCycleCount();
                         break;
                     }
                 //STA Store Accumulator In Memory, Absolute Y, 3 Bytes, 5 Cycles
                 case 0x99:
                     {
-                        _core.WriteMemory(GetAddressByAddressingMode(AddressingMode.AbsoluteY), (byte)Accumulator);
-                        NumberofCyclesLeft += 5;
-                        IncrementProgramCounter(3);
+                        WriteMemoryValue(GetAddressByAddressingMode(AddressingMode.AbsoluteY), (byte)Accumulator);
+                        IncrementCycleCount();
                         break;
                     }
                 //STA Store Accumulator In Memory, Indexed Indirect, 2 Bytes, 6 Cycles
                 case 0x81:
                     {
-                        _core.WriteMemory(GetAddressByAddressingMode(AddressingMode.IndirectX), (byte)Accumulator);
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(2);
+                        WriteMemoryValue(GetAddressByAddressingMode(AddressingMode.IndirectX), (byte)Accumulator);
                         break;
                     }
                 //STA Store Accumulator In Memory, Indirect Indexed, 2 Bytes, 6 Cycles
                 case 0x91:
                     {
-                        _core.WriteMemory(GetAddressByAddressingMode(AddressingMode.IndirectY), (byte)Accumulator);
-                        NumberofCyclesLeft += 6;
-                        IncrementProgramCounter(2);
+                        WriteMemoryValue(GetAddressByAddressingMode(AddressingMode.IndirectY), (byte)Accumulator);
+                        IncrementCycleCount();
                         break;
                     }
                 //STX Store Index X, Zero Page, 2 Bytes, 3 Cycles
                 case 0x86:
                     {
-                        _core.WriteMemory(GetAddressByAddressingMode(AddressingMode.ZeroPage), (byte)XRegister);
-                        NumberofCyclesLeft += 3;
-                        IncrementProgramCounter(2);
+                        WriteMemoryValue(GetAddressByAddressingMode(AddressingMode.ZeroPage), (byte)XRegister);
                         break;
                     }
                 //STX Store Index X, Zero Page Y, 2 Bytes, 4 Cycles
                 case 0x96:
                     {
-                        _core.WriteMemory(GetAddressByAddressingMode(AddressingMode.ZeroPageY), (byte)XRegister);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(2);
+                        WriteMemoryValue(GetAddressByAddressingMode(AddressingMode.ZeroPageY), (byte)XRegister);
                         break;
                     }
                 //STX Store Index X, Absolute, 3 Bytes, 4 Cycles
                 case 0x8E:
                     {
-                        _core.WriteMemory(GetAddressByAddressingMode(AddressingMode.Absolute), (byte)XRegister);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
+                        WriteMemoryValue(GetAddressByAddressingMode(AddressingMode.Absolute), (byte)XRegister);
                         break;
                     }
                 //STY Store Index Y, Zero Page, 2 Bytes, 3 Cycles
                 case 0x84:
                     {
-                        _core.WriteMemory(GetAddressByAddressingMode(AddressingMode.ZeroPage), (byte)YRegister);
-                        NumberofCyclesLeft += 3;
-                        IncrementProgramCounter(2);
+                        WriteMemoryValue(GetAddressByAddressingMode(AddressingMode.ZeroPage), (byte)YRegister);
                         break;
                     }
                 //STY Store Index Y, Zero Page X, 2 Bytes, 4 Cycles
                 case 0x94:
                     {
-                        _core.WriteMemory(GetAddressByAddressingMode(AddressingMode.ZeroPageX), (byte)YRegister);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(2);
+                        WriteMemoryValue(GetAddressByAddressingMode(AddressingMode.ZeroPageX), (byte)YRegister);
                         break;
                     }
                 //STY Store Index Y, Absolute, 2 Bytes, 4 Cycles
                 case 0x8C:
                     {
-                        _core.WriteMemory(GetAddressByAddressingMode(AddressingMode.Absolute), (byte)YRegister);
-                        NumberofCyclesLeft += 4;
-                        IncrementProgramCounter(3);
+                        WriteMemoryValue(GetAddressByAddressingMode(AddressingMode.Absolute), (byte)YRegister);
                         break;
                     }
                 #endregion
@@ -1515,49 +1324,41 @@ namespace pNes
                 //TAX Transfer Accumulator to X Register, Implied, 1 Bytes, 2 Cycles
                 case 0xAA:
                     {
+                        IncrementCycleCount();
                         XRegister = Accumulator;
 
                         SetNegativeFlag(XRegister);
                         SetZeroFlag(XRegister);
-
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
                         break;
                     }
                 //TAY Transfer Accumulator to Y Register, 1 Bytes, 2 Cycles
                 case 0xA8:
                     {
+                        IncrementCycleCount();
                         YRegister = Accumulator;
 
                         SetNegativeFlag(YRegister);
                         SetZeroFlag(YRegister);
-
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
                         break;
                     }
                 //TXA Transfer X Register to Accumulator, Implied, 1 Bytes, 2 Cycles
                 case 0x8A:
                     {
+                        IncrementCycleCount();
                         Accumulator = XRegister;
 
                         SetNegativeFlag(Accumulator);
                         SetZeroFlag(Accumulator);
-
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
                         break;
                     }
                 //TYA Transfer Y Register to Accumulator, Implied, 1 Bytes, 2 Cycles
                 case 0x98:
                     {
+                        IncrementCycleCount();
                         Accumulator = YRegister;
 
                         SetNegativeFlag(Accumulator);
                         SetZeroFlag(Accumulator);
-
-                        NumberofCyclesLeft += 2;
-                        IncrementProgramCounter(1);
                         break;
                     }
                 #endregion
@@ -1565,31 +1366,20 @@ namespace pNes
                 //NOP Operation, Implied, 1 Byte, 2 Cycles
                 case 0xEA:
                     {
-                        NumberofCyclesLeft += 2;
+                        IncrementCycleCount();
                         break;
                     }
 
-                default: 
-                    throw new NotSupportedException(string.Format("The OpCode {0} is not supported", CurrentOpCode));
+                default: break;
+                    //throw new NotSupportedException(string.Format("The OpCode {0} is not supported", CurrentOpCode));
             }
-        }
-
-        /// <summary>
-        /// Increments the program Counter. We always Increment by 1 less than the value that is passed in to account for the increment that happens after the current
-        /// Op code is retrieved
-        /// </summary>
-        /// <param name="lengthOfOperation">The lenght of the operation</param>
-        private void IncrementProgramCounter(int lengthOfOperation)
-        {
-            //The PC gets increments after the opcode is retrieved but before the opcode is executed. We want to add the remaining length.
-            ProgramCounter += lengthOfOperation - 1;
         }
 
         /// <summary>
         /// Sets the IsSignNegative register
         /// </summary>
         /// <param name="value"></param>
-        private void SetNegativeFlag(int value)
+        protected void SetNegativeFlag(int value)
         {
             //on the 6502, any value greater than 127 is negative. 128 = 1000000 in Binary. the 8th bit is set, therefore the number is a negative number.
             NegativeFlag = value > 127;
@@ -1599,7 +1389,7 @@ namespace pNes
         /// Sets the IsResultZero register
         /// </summary>
         /// <param name="value"></param>
-        private void SetZeroFlag(int value)
+        protected void SetZeroFlag(int value)
         {
             ZeroFlag = value == 0;
         }
@@ -1611,38 +1401,28 @@ namespace pNes
         /// </summary>
         /// <param name="addressingMode">The addressing Mode to use</param>
         /// <returns>The memory Location</returns>
-        private int GetAddressByAddressingMode(AddressingMode addressingMode)
+        protected int GetAddressByAddressingMode(AddressingMode addressingMode)
         {
-            int address = 0;
+            int address;
+            int highByte;
             switch (addressingMode)
             {
                 case (AddressingMode.Absolute):
                     {
-                        //Get the first half of the address
-                        address = _core.ReadMemory(ProgramCounter);
-
-                        //Get the second half of the address. We multiple the value by 256 so we retrieve the right address. 
-                        //IF the first Value is FF and the second value is FF the address would be FFFF.
-                        address += 256 * _core.ReadMemory(ProgramCounter + 1);
-                        return address;
+                        return (ReadMemoryValue(ProgramCounter++) | (ReadMemoryValue(ProgramCounter++) << 8));
                     }
                 case AddressingMode.AbsoluteX:
                     {
-                        //Get the first half of the address
-                        address = _core.ReadMemory(ProgramCounter);
+                        //Get the low half of the address
+                        address = ReadMemoryValue(ProgramCounter++);
 
-                        //Get the second half of the address. We multiple the value by 256 so we retrieve the right address. 
-                        //IF the first Value is FF and the second value is FF the address would be FFFF.
-                        //Then add the X Register value to that.
-                        //We don't increment the program counter here, because it is incremented as part of the operation.
-                        address += (256 * _core.ReadMemory(ProgramCounter + 1) + XRegister);
+                        //Get the high byte
+                        highByte = ReadMemoryValue(ProgramCounter++);
 
-                        //This address wraps if its greater than 0xFFFF
-                        if (address > 0xFFFF)
+                        //We crossed a page boundry, so an extra read has occurred.
+                        //However, if this is an ASL, LSR, DEC, INC, ROR, ROL or STA operation, we do not decrease it by 1.
+                        if (address + XRegister > 0xFF)
                         {
-                            address -= 0x10000;
-                            //We crossed a page boundry, so decrease the number of cycles by 1.
-                            //However, if this is an ASL, LSR, DEC, INC, ROR, ROL or STA operation, we do not decrease it by 1.
                             switch (CurrentOpCode)
                             {
                                 case 0x1E:
@@ -1653,71 +1433,64 @@ namespace pNes
                                 case 0x7E:
                                 case 0x9D:
                                     {
-                                        return address;
+                                        //This is a Read Fetch Write Operation, so we don't make the extra read.
+                                        return ((highByte << 8 | address) + XRegister) & 0xFFFF;
                                     }
                                 default:
                                     {
-                                        NumberofCyclesLeft++;
+                                        ReadMemoryValue((((highByte << 8 | address) + XRegister) - 0xFF) & 0xFFFF);
                                         break;
                                     }
                             }
                         }
-                        return address;
+
+                        return ((highByte << 8 | address) + XRegister) & 0xFFFF;
                     }
                 case AddressingMode.AbsoluteY:
                     {
-                        //Get the first half of the address
-                        address = _core.ReadMemory(ProgramCounter);
+                        //Get the low half of the address
+                        address = ReadMemoryValue(ProgramCounter++);
 
-                        //Get the second half of the address. We multiple the value by 256 so we retrieve the right address. 
-                        //IF the first Value is FF and the second value is FF the address would be FFFF.
-                        //Then add the Y Register value to that.
-                        //We don't increment the program counter here, because it is incremented as part of the operation.
-                        address += (256 * _core.ReadMemory(ProgramCounter + 1) + YRegister);
+                        //Get the high byte
+                        highByte = ReadMemoryValue(ProgramCounter++);
 
-                        //This address wraps if its greater than 0xFFFF
-                        if (address > 0xFFFF)
+                        //We crossed a page boundry, so decrease the number of cycles by 1 if the operation is not STA
+                        if (address + YRegister > 0xFF && CurrentOpCode != 0x99)
                         {
-                            address -= 0x10000;
-                            //We crossed a page boundry, so decrease the number of cycles by 1 if the operation is not STA
-                            if (CurrentOpCode != 0x99)
-                                NumberofCyclesLeft++;
+                            ReadMemoryValue((((highByte << 8 | address) + YRegister) - 0xFF) & 0xFFFF);
                         }
-                        return address;
+
+                        //Bitshift the high byte into place, AND with FFFF to handle wrapping.
+                        return ((highByte << 8 | address) + YRegister) & 0xFFFF;
                     }
                 case AddressingMode.Immediate:
                     {
-                        return ProgramCounter;
+                        return ProgramCounter++;
                     }
                 case AddressingMode.IndirectX:
                     {
                         //Get the location of the address to retrieve
-                        address = _core.ReadMemory(ProgramCounter) + XRegister;
+                        address = ReadMemoryValue(ProgramCounter++);
+                        ReadMemoryValue(address);
 
-                        //Its a zero page address, so it wraps around if greater than 0xff
-                        if (address > 0xff)
-                            address -= 0x100;
+                        address += XRegister;
 
                         //Now get the final Address. The is not a zero page address either.
-                        var finalAddress = _core.ReadMemory(address) + (_core.ReadMemory((address + 1) &0xFF) << 8);
+                        var finalAddress = ReadMemoryValue((address & 0xFF)) | (ReadMemoryValue((address + 1) & 0xFF) << 8);
                         return finalAddress;
                     }
                 case AddressingMode.IndirectY:
                     {
-                        address = _core.ReadMemory(ProgramCounter);
+                        address = ReadMemoryValue(ProgramCounter++);
 
-                        var finalAddress = _core.ReadMemory(address) + (_core.ReadMemory((address + 1 & 0xFF)) << 8) + YRegister;
+                        var finalAddress = ReadMemoryValue(address) + (ReadMemoryValue((address + 1) & 0xFF) << 8);
 
-                        //This address wraps if its greater than 0xFFFF
-                        if (finalAddress > 0xFFFF)
+                        if ((finalAddress & 0xFF) + YRegister > 0xFF && CurrentOpCode != 0x91)
                         {
-                            finalAddress -= 0x10000;
-
-                            //We crossed a page boundry, so decrease the number of cycles by 1 if the operation is not STA
-                            if (CurrentOpCode != 0x91)
-                                NumberofCyclesLeft++;
+                            ReadMemoryValue((finalAddress + YRegister - 0xFF) & 0xFFFF);
                         }
-                        return finalAddress;
+
+                        return (finalAddress + YRegister) & 0xFFFF;
                     }
                 case AddressingMode.Relative:
                     {
@@ -1725,57 +1498,33 @@ namespace pNes
                     }
                 case (AddressingMode.ZeroPage):
                     {
-                        address = _core.ReadMemory(ProgramCounter);
+                        address = ReadMemoryValue(ProgramCounter++);
                         return address;
                     }
                 case (AddressingMode.ZeroPageX):
                     {
-                        address = _core.ReadMemory(ProgramCounter);
-                        address += XRegister;
+                        address = ReadMemoryValue(ProgramCounter++);
+                        ReadMemoryValue(address);
 
-                        //This address wraps if its greater than 0xFFFF
+                        address += XRegister;
+                        address &= 0xFF;
+
+                        //This address wraps if its greater than 0xFF
                         if (address > 0xFF)
                         {
                             address -= 0x100;
-
-                            //We crossed a page boundry, so decrease the number of cycles by 1.
-                            //However, if this is an ASL, LSR, DEC, INC, ROR, ROL or STA operation, we do not decrease it by 1.
-                            switch (CurrentOpCode)
-                            {
-                                case 0x1E:
-                                case 0xDE:
-                                case 0xFE:
-                                case 0x5E:
-                                case 0x3E:
-                                case 0x7E:
-                                case 0x9D:
-                                    {
-                                        return address;
-                                    }
-                                default:
-                                    {
-                                        NumberofCyclesLeft++;
-                                        break;
-                                    }
-                            }
+                            return address;
                         }
 
                         return address;
                     }
                 case (AddressingMode.ZeroPageY):
                     {
-                        address = _core.ReadMemory(ProgramCounter);
+                        address = ReadMemoryValue(ProgramCounter++);
+                        ReadMemoryValue(address);
 
                         address += YRegister;
-
-                        //This address wraps if its greater than 0xFFFF
-                        if (address > 0xFF)
-                        {
-                            address -= 0x100;
-                            //We crossed a page boundry, so decrease the number of cycles by 1 if the operation is not STA
-                            if (CurrentOpCode != 0x99)
-                                NumberofCyclesLeft++;
-                        }
+                        address &= 0xFF;
 
                         return address;
                     }
@@ -1788,7 +1537,7 @@ namespace pNes
         /// Moves the ProgramCounter in a given direction based on the value inputted
         /// 
         /// </summary>
-        private int MoveProgramCounterByRelativeValue(byte valueToMove)
+        private void MoveProgramCounterByRelativeValue(byte valueToMove)
         {
             var movement = valueToMove > 127 ? (valueToMove - 255) : valueToMove;
 
@@ -1798,12 +1547,14 @@ namespace pNes
             if (movement >= 0)
                 newProgramCounter++;
 
-            if (newProgramCounter < 0x0 || newProgramCounter > 0xFFFF)
+            //We Crossed a Page Boundary. So we increment the cycle counter by one. The +1 is because we always check from the end of the instruction not the beginning
+            if (((ProgramCounter + 1 ^ newProgramCounter) & 0xff00) != 0x0000)
             {
-                //We crossed a page boundry, so decrease the number of cycles by 1.
-                NumberofCyclesLeft++;
+                IncrementCycleCount();
             }
-            return newProgramCounter;
+
+            ProgramCounter = newProgramCounter;
+            ReadMemoryValue(ProgramCounter);
         }
 
         /// <summary>
@@ -1838,126 +1589,10 @@ namespace pNes
                          (DecimalFlag ? 8 : 0) + (setBreak ? 0x10 : 0) + 0x20 + (OverflowFlag ? 0x40 : 0) + (NegativeFlag ? 0x80 : 0));
         }
 
-        private void SetDisassembly()
-        {
-            var addressMode = GetAddressingMode();
-
-            var currentProgramCounter = ProgramCounter;
-
-            currentProgramCounter = WrapProgramCounter(++currentProgramCounter);
-            int? address1 = _core.ReadMemory(currentProgramCounter);
-
-            currentProgramCounter = WrapProgramCounter(++currentProgramCounter);
-            int? address2 = _core.ReadMemory(currentProgramCounter);
-
-
-            string disassembledStep = string.Empty;
-
-            switch (addressMode)
-            {
-                case AddressingMode.Absolute:
-                    {
-                        disassembledStep = string.Format("${0}{1}", address2.Value.ToString("X").PadLeft(2, '0'), address1.Value.ToString("X").PadLeft(2, '0'));
-                        break;
-                    }
-                case AddressingMode.AbsoluteX:
-                    {
-                        disassembledStep = string.Format("${0}{1},X", address2.Value.ToString("X").PadLeft(2, '0'), address1.Value.ToString("X").PadLeft(2, '0'));
-                        break;
-                    }
-                case AddressingMode.AbsoluteY:
-                    {
-                        disassembledStep = string.Format("${0}{1},Y", address2.Value.ToString("X").PadLeft(2, '0'), address1.Value.ToString("X").PadLeft(2, '0'));
-                        break;
-                    }
-                case AddressingMode.Accumulator:
-                    {
-                        address1 = null;
-                        address2 = null;
-
-                        disassembledStep = "A";
-                        break;
-                    }
-                case AddressingMode.Immediate:
-                    {
-                        disassembledStep = string.Format("#${0}", address1.Value.ToString("X").PadLeft(4, '0'));
-                        address2 = null;
-                        break;
-                    }
-                case AddressingMode.Implied:
-                    {
-                        address1 = null;
-                        address2 = null;
-                        break;
-                    }
-                case AddressingMode.Indirect:
-                    {
-                        disassembledStep = string.Format("(${0}{1})", address2.Value.ToString("X").PadLeft(2, '0'), address1.Value.ToString("X").PadLeft(2, '0'));
-                        break;
-                    }
-                case AddressingMode.IndirectX:
-                    {
-                        address2 = null;
-
-                        disassembledStep = string.Format("(${0},X)", address1.Value.ToString("X").PadLeft(2, '0'));
-                        break;
-                    }
-                case AddressingMode.IndirectY:
-                    {
-                        address2 = null;
-
-                        disassembledStep = string.Format("(${0}),Y", address1.Value.ToString("X").PadLeft(2, '0'));
-                        break;
-                    }
-                case AddressingMode.Relative:
-                    {
-                        var relativeAddress = MoveProgramCounterByRelativeValue((byte)address1.Value);
-                        relativeAddress = WrapProgramCounter(relativeAddress);
-
-                        var stringAddress = relativeAddress.ToString("X").PadLeft(4, '0');
-
-                        address1 = int.Parse(stringAddress.Substring(0, 2), NumberStyles.AllowHexSpecifier);
-                        address2 = int.Parse(stringAddress.Substring(2, 2), NumberStyles.AllowHexSpecifier);
-
-                        disassembledStep = string.Format("${0}", relativeAddress.ToString("X").PadLeft(4, '0'));
-                        break;
-                    }
-                case AddressingMode.ZeroPage:
-                    {
-                        address2 = null;
-
-                        disassembledStep = string.Format("${0}", address1.Value.ToString("X").PadLeft(2, '0'));
-                        break;
-                    }
-                case AddressingMode.ZeroPageX:
-                    {
-                        address2 = null;
-
-                        disassembledStep = string.Format("${0},X", address1.Value.ToString("X").PadLeft(2, '0'));
-                        break;
-                    }
-                case AddressingMode.ZeroPageY:
-                    {
-                        address2 = null;
-
-                        disassembledStep = string.Format("${0},Y", address1.Value.ToString("X").PadLeft(4, '0'));
-                        break;
-                    }
-                default:
-                    throw new InvalidEnumArgumentException("Invalid Addressing Mode");
-
-            }
-   
-        }
 
         private int WrapProgramCounter(int value)
         {
-            if (value > 0xFFFF)
-                value = value - 0x10000;
-            else if (value < 0)
-                value = value + 0x10000;
-
-            return value;
+            return value & 0xFFFF;
         }
 
         private AddressingMode GetAddressingMode()
@@ -2154,7 +1789,7 @@ namespace pNes
                         return AddressingMode.ZeroPageX;
                     }
                 default:
-                    throw new InvalidEnumArgumentException(string.Format("Unable to find Opcode {0} when Looking up Addressing Mode", CurrentOpCode));
+                    throw new NotSupportedException(string.Format("Opcode {0} is not supported", CurrentOpCode));
             }
         }
 
@@ -2163,49 +1798,49 @@ namespace pNes
         /// The ADC - Add Memory to Accumulator with Carry Operation
         /// </summary>
         /// <param name="addressingMode">The addressing mode used to perform this operation.</param>
-        private void AddWithCarryOperation(AddressingMode addressingMode)
+        protected virtual void AddWithCarryOperation(AddressingMode addressingMode)
         {
             //Accumulator, Carry = Accumulator + ValueInMemoryLocation + Carry 
             var memoryValue = _core.ReadMemory(GetAddressByAddressingMode(addressingMode));
             var newValue = memoryValue + Accumulator + (CarryFlag ? 1 : 0);
             SetZeroFlag(newValue & 0xFF);
 
-            
 
-            if (DecimalFlag)
+
+            //if (DecimalFlag) // Decimal flag disabled on nes
+            //{
+            //    if (((Accumulator & 0xF) + (memoryValue & 0xF) + (CarryFlag ? 1 : 0)) > 9) newValue += 6;
+
+            //    OverflowFlag = (((Accumulator ^ newValue) & 0x80) != 0) && (((Accumulator ^ memoryValue) & 0x80) == 0);
+            //    SetNegativeFlag(newValue & 0xFF);
+            //    if (newValue > 0x99)
+            //    {
+            //        newValue += 96;
+            //    }
+
+            //    if (newValue > 0x99)
+            //    {
+            //        CarryFlag = true;
+            //    }
+            //    else
+            //    {
+            //        CarryFlag = false;
+            //    }
+
+            //}
+            //else
+            //{
+                
+            //}
+            OverflowFlag = (((Accumulator ^ newValue) & 0x80) != 0) && (((Accumulator ^ memoryValue) & 0x80) == 0);
+            SetNegativeFlag(newValue & 0xFF);
+            if (newValue > 255)
             {
-                if (((Accumulator & 0xF) + (memoryValue & 0xF) + (CarryFlag ? 1 : 0)) > 9) newValue += 6;
-
-                OverflowFlag = (((Accumulator ^ newValue) & 0x80) != 0) && (((Accumulator ^ memoryValue) & 0x80) == 0);
-                SetNegativeFlag(newValue & 0xFF);
-                if (newValue > 0x99)
-                {
-                    newValue += 96;
-                }
-
-                if (newValue > 0x99)
-                {
-                    CarryFlag = true;
-                }
-                else
-                {
-                    CarryFlag = false;
-                }
-             
+                CarryFlag = true;
             }
             else
             {
-                OverflowFlag = (((Accumulator ^ newValue) & 0x80) != 0) && (((Accumulator ^ memoryValue) & 0x80) == 0);
-                SetNegativeFlag(newValue & 0xFF);
-                if (newValue > 255)
-                {
-                    CarryFlag = true;
-                    //newValue -= 256;
-                }
-                else
-                {
-                    CarryFlag = false;
-                }
+                CarryFlag = false;
             }
 
             Accumulator = newValue & 0xFF;
@@ -2217,7 +1852,7 @@ namespace pNes
         /// <param name="addressingMode">The addressing mode being used</param>
         private void AndOperation(AddressingMode addressingMode)
         {
-            Accumulator = _core.ReadMemory(GetAddressByAddressingMode(addressingMode)) & Accumulator;
+            Accumulator = ReadMemoryValue(GetAddressByAddressingMode(addressingMode)) & Accumulator;
 
             SetZeroFlag(Accumulator);
             SetNegativeFlag(Accumulator);
@@ -2229,14 +1864,23 @@ namespace pNes
         /// <param name="addressingMode">The addressing Mode being used</param>
         public void AslOperation(AddressingMode addressingMode)
         {
-            int value = 0;
+            int value;
             var memoryAddress = 0;
             if (addressingMode == AddressingMode.Accumulator)
+            {
+                ReadMemoryValue(ProgramCounter + 1);
                 value = Accumulator;
+            }
             else
             {
                 memoryAddress = GetAddressByAddressingMode(addressingMode);
-                value = _core.ReadMemory(memoryAddress);
+                value = ReadMemoryValue(memoryAddress);
+            }
+
+            //Dummy Write
+            if (addressingMode != AddressingMode.Accumulator)
+            {
+                WriteMemoryValue(memoryAddress, (byte)value);
             }
 
             //If the 7th bit is set, then we have a carry
@@ -2248,11 +1892,12 @@ namespace pNes
             SetNegativeFlag(value);
             SetZeroFlag(value);
 
+
             if (addressingMode == AddressingMode.Accumulator)
                 Accumulator = value;
             else
             {
-                _core.WriteMemory(memoryAddress, (byte)value);
+                WriteMemoryValue(memoryAddress, (byte)value);
             }
         }
 
@@ -2262,19 +1907,15 @@ namespace pNes
         /// <param name="performBranch">Is a branch required</param>
         private void BranchOperation(bool performBranch)
         {
+            var value = ReadMemoryValue(GetAddressByAddressingMode(AddressingMode.Relative));
+
             if (!performBranch)
             {
-                IncrementProgramCounter(2);
+                ProgramCounter++;
                 return;
             }
 
-            var value = _core.ReadMemory(GetAddressByAddressingMode(AddressingMode.Relative));
-
-            ProgramCounter = MoveProgramCounterByRelativeValue(value);
-            //We add a cycle because the branch occured.
-            NumberofCyclesLeft += 1;
-
-            //IncrementProgramCounter(2);
+            MoveProgramCounterByRelativeValue(value);
         }
 
         /// <summary>
@@ -2284,7 +1925,7 @@ namespace pNes
         private void BitOperation(AddressingMode addressingMode)
         {
 
-            var memoryValue = _core.ReadMemory(GetAddressByAddressingMode(addressingMode));
+            var memoryValue = ReadMemoryValue(GetAddressByAddressingMode(addressingMode));
             var valueToCompare = memoryValue & Accumulator;
 
             OverflowFlag = (memoryValue & 0x40) != 0;
@@ -2300,16 +1941,15 @@ namespace pNes
         /// <param name="comparisonValue">The value to compare against memory</param>
         private void CompareOperation(AddressingMode addressingMode, int comparisonValue)
         {
-            var memoryValue = _core.ReadMemory(GetAddressByAddressingMode(addressingMode));
+            var memoryValue = ReadMemoryValue(GetAddressByAddressingMode(addressingMode));
             var comparedValue = comparisonValue - memoryValue;
 
-            if (comparedValue < 0)
-                comparedValue += 0x10000;
+            //if (comparedValue < 0)
+            //    comparedValue += 0x10000;
 
+            CarryFlag = comparedValue < 0x100 && comparedValue >= 0;
+            comparedValue &= 0xFF;
             SetZeroFlag(comparedValue);
-
-            //CarryFlag = memoryValue <= comparisonValue;
-            CarryFlag = comparedValue < 0x100;
             SetNegativeFlag(comparedValue);
         }
 
@@ -2321,7 +1961,9 @@ namespace pNes
         private void ChangeMemoryByOne(AddressingMode addressingMode, bool decrement)
         {
             var memoryLocation = GetAddressByAddressingMode(addressingMode);
-            var memory = _core.ReadMemory(memoryLocation);
+            var memory = ReadMemoryValue(memoryLocation);
+
+            WriteMemoryValue(memoryLocation, memory);
 
             if (decrement)
                 memory -= 1;
@@ -2331,7 +1973,8 @@ namespace pNes
             SetZeroFlag(memory);
             SetNegativeFlag(memory);
 
-            _core.WriteMemory(memoryLocation, memory);
+
+            WriteMemoryValue(memoryLocation, memory);
         }
 
         /// <summary>
@@ -2355,6 +1998,7 @@ namespace pNes
 
             SetZeroFlag(value);
             SetNegativeFlag(value);
+            IncrementCycleCount();
 
             if (useXRegister)
                 XRegister = value;
@@ -2368,7 +2012,7 @@ namespace pNes
         /// <param name="addressingMode">The addressing mode to use</param>
         private void EorOperation(AddressingMode addressingMode)
         {
-            Accumulator = Accumulator ^ _core.ReadMemory(GetAddressByAddressingMode(addressingMode));
+            Accumulator = Accumulator ^ ReadMemoryValue(GetAddressByAddressingMode(addressingMode));
 
             SetNegativeFlag(Accumulator);
             SetZeroFlag(Accumulator);
@@ -2380,14 +2024,23 @@ namespace pNes
         /// <param name="addressingMode">The addressing mode to use</param>
         private void LsrOperation(AddressingMode addressingMode)
         {
-            int value = 0;
+            int value;
             var memoryAddress = 0;
             if (addressingMode == AddressingMode.Accumulator)
+            {
+                ReadMemoryValue(ProgramCounter + 1);
                 value = Accumulator;
+            }
             else
             {
                 memoryAddress = GetAddressByAddressingMode(addressingMode);
-                value = _core.ReadMemory(memoryAddress);
+                value = ReadMemoryValue(memoryAddress);
+            }
+
+            //Dummy Write
+            if (addressingMode != AddressingMode.Accumulator)
+            {
+                WriteMemoryValue(memoryAddress, (byte)value);
             }
 
             NegativeFlag = false;
@@ -2398,12 +2051,11 @@ namespace pNes
             value = (value >> 1);
 
             SetZeroFlag(value);
-
             if (addressingMode == AddressingMode.Accumulator)
                 Accumulator = value;
             else
             {
-                _core.WriteMemory(memoryAddress, (byte)value);
+                WriteMemoryValue(memoryAddress, (byte)value);
             }
         }
 
@@ -2413,7 +2065,7 @@ namespace pNes
         /// <param name="addressingMode">The addressing mode to use</param>
         private void OrOperation(AddressingMode addressingMode)
         {
-            Accumulator = Accumulator | _core.ReadMemory(GetAddressByAddressingMode(addressingMode));
+            Accumulator = Accumulator | ReadMemoryValue(GetAddressByAddressingMode(addressingMode));
 
             SetNegativeFlag(Accumulator);
             SetZeroFlag(Accumulator);
@@ -2425,14 +2077,24 @@ namespace pNes
         /// <param name="addressingMode">The addressing mode to use</param>
         private void RolOperation(AddressingMode addressingMode)
         {
-            int value = 0;
+            int value;
             var memoryAddress = 0;
             if (addressingMode == AddressingMode.Accumulator)
+            {
+                //Dummy Read
+                ReadMemoryValue(ProgramCounter + 1);
                 value = Accumulator;
+            }
             else
             {
                 memoryAddress = GetAddressByAddressingMode(addressingMode);
-                value = _core.ReadMemory(memoryAddress);
+                value = ReadMemoryValue(memoryAddress);
+            }
+
+            //Dummy Write
+            if (addressingMode != AddressingMode.Accumulator)
+            {
+                WriteMemoryValue(memoryAddress, (byte)value);
             }
 
             //Store the carry flag before shifting it
@@ -2449,11 +2111,12 @@ namespace pNes
             SetZeroFlag(value);
             SetNegativeFlag(value);
 
+
             if (addressingMode == AddressingMode.Accumulator)
                 Accumulator = value;
             else
             {
-                _core.WriteMemory(memoryAddress, (byte)value);
+                WriteMemoryValue(memoryAddress, (byte)value);
             }
         }
 
@@ -2463,14 +2126,24 @@ namespace pNes
         /// <param name="addressingMode">The addressing mode to use</param>
         private void RorOperation(AddressingMode addressingMode)
         {
-            int value = 0;
+            int value;
             var memoryAddress = 0;
             if (addressingMode == AddressingMode.Accumulator)
+            {
+                //Dummy Read
+                ReadMemoryValue(ProgramCounter + 1);
                 value = Accumulator;
+            }
             else
             {
                 memoryAddress = GetAddressByAddressingMode(addressingMode);
-                value = _core.ReadMemory(memoryAddress);
+                value = ReadMemoryValue(memoryAddress);
+            }
+
+            //Dummy Write
+            if (addressingMode != AddressingMode.Accumulator)
+            {
+                WriteMemoryValue(memoryAddress, (byte)value);
             }
 
             //Store the carry flag before shifting it
@@ -2491,7 +2164,7 @@ namespace pNes
                 Accumulator = value;
             else
             {
-                _core.WriteMemory(memoryAddress, (byte)value);
+                WriteMemoryValue(memoryAddress, (byte)value);
             }
         }
 
@@ -2499,12 +2172,12 @@ namespace pNes
         /// The SBC operation. Performs a subtract with carry operation on the accumulator and a value in memory.
         /// </summary>
         /// <param name="addressingMode">The addressing mode to use</param>
-        private void SubtractWithBorrowOperation(AddressingMode addressingMode)
+        protected virtual void SubtractWithBorrowOperation(AddressingMode addressingMode)
         {
             var memoryValue = _core.ReadMemory(GetAddressByAddressingMode(addressingMode));
             var newValue = Accumulator - memoryValue - (CarryFlag ? 0 : 1);
             OverflowFlag = (((Accumulator ^ newValue) & 0x80) != 0) && (((Accumulator ^ memoryValue) & 0x80) != 0);
-            
+
             if (DecimalFlag)
             {
                 if (((Accumulator & 0x0F) - (CarryFlag ? 0 : 1)) < (memoryValue & 0x0F)) newValue -= 6;
@@ -2515,7 +2188,7 @@ namespace pNes
             }
             else
             {
-                
+
 
                 //if (newValue < 0)
                 //    newValue += 256;
@@ -2558,18 +2231,19 @@ namespace pNes
         /// </summary>
         private void JumpToSubRoutineOperation()
         {
+            IncrementCycleCount();
+
             //Put the high value on the stack, this should be the address after our operation -1
             //The RTS operation increments the PC by 1 which is why we don't move 2
             PokeStack((byte)(((ProgramCounter + 1) >> 8) & 0xFF));
-
             StackPointer--;
+            IncrementCycleCount();
 
             PokeStack((byte)((ProgramCounter + 1) & 0xFF));
-
             StackPointer--;
+            IncrementCycleCount();
 
             ProgramCounter = GetAddressByAddressingMode(AddressingMode.Absolute);
-
         }
 
         /// <summary>
@@ -2577,32 +2251,39 @@ namespace pNes
         /// </summary>
         private void ReturnFromSubRoutineOperation()
         {
+            ReadMemoryValue(++ProgramCounter);
             StackPointer++;
+            IncrementCycleCount();
 
             var lowBit = PeekStack();
-
             StackPointer++;
+            IncrementCycleCount();
 
             var highBit = PeekStack() << 8;
+            IncrementCycleCount();
 
             ProgramCounter = (highBit | lowBit) + 1;
+            IncrementCycleCount();
         }
+
 
         /// <summary>
         /// The BRK routine. Called when a BRK occurs.
         /// </summary>
         private void BreakOperation(bool isBrk, int vector)
         {
+            ReadMemoryValue(++ProgramCounter);
+
             //Put the high value on the stack
             //When we RTI the address will be incremented by one, and the address after a break will not be used.
-            PokeStack((byte)(((ProgramCounter + 1) >> 8) & 0xFF));
-
+            PokeStack((byte)(((ProgramCounter) >> 8) & 0xFF));
             StackPointer--;
+            IncrementCycleCount();
 
             //Put the low value on the stack
-            PokeStack((byte)((ProgramCounter + 1) & 0xFF));
-
+            PokeStack((byte)((ProgramCounter) & 0xFF));
             StackPointer--;
+            IncrementCycleCount();
 
             //We only set the Break Flag is a Break Occurs
             if (isBrk)
@@ -2611,10 +2292,13 @@ namespace pNes
                 PokeStack(ConvertFlagsToByte(false));
 
             StackPointer--;
+            IncrementCycleCount();
 
             DisableInterruptFlag = true;
 
-            ProgramCounter = (_core.ReadMemory(vector + 1) << 8) | _core.ReadMemory(vector);
+            ProgramCounter = (ReadMemoryValue(vector + 1) << 8) | ReadMemoryValue(vector);
+
+            _previousInterrupt = false;
         }
 
         /// <summary>
@@ -2624,100 +2308,50 @@ namespace pNes
         /// </summary>
         private void ReturnFromInterruptOperation()
         {
+            ReadMemoryValue(++ProgramCounter);
             StackPointer++;
+            IncrementCycleCount();
 
             PullFlagsOperation();
-
             StackPointer++;
+            IncrementCycleCount();
 
             var lowBit = PeekStack();
-
             StackPointer++;
+            IncrementCycleCount();
 
             var highBit = PeekStack() << 8;
+            IncrementCycleCount();
 
             ProgramCounter = (highBit | lowBit);
+        }
+
+        /// <summary>
+        /// This is ran anytime an NMI occurrs
+        /// </summary>
+	    private void ProcessNMI()
+        {
+            ProgramCounter--;
+            BreakOperation(false, 0xFFFA);
+            CurrentOpCode = ReadMemoryValue(ProgramCounter);
+
+        }
+
+        /// <summary>
+        /// This is ran anytime an IRQ occurrs
+        /// </summary>
+        private void ProcessIRQ()
+        {
+            if (DisableInterruptFlag)
+                return;
+
+            ProgramCounter--;
+            BreakOperation(false, 0xFFFE);
+            CurrentOpCode = ReadMemoryValue(ProgramCounter);
+
         }
         #endregion
 
         #endregion
-    }
-
-
-    public enum AddressingMode
-    {
-        /// <summary>
-        /// In this mode a full address is given to operation on IE: Memory byte[] { 0x60, 0x00, 0xFF } 
-        /// would perform an ADC operation and Add the value at ADDRESS 0xFF00 to the accumulator.
-        /// The address is always LSB first
-        /// </summary>
-        Absolute = 1,
-        /// <summary>
-        /// In this mode a full address is given to operation on IE: Memory byte[] { 0x7D, 0x00, 0xFF } The full value would then be added to the X Register.
-        /// If the X register was 0x01 then the address would be 0xFF01. and the value stored there would have an ADC operation performed on it and the value would
-        /// be added to the accumulator.
-        /// </summary>
-        AbsoluteX = 2,
-        /// <summary>
-        /// In this mode a full address is given to operation on IE: Memory byte[] { 0x79, 0x00, 0xFF } The full value would then be added to the Y Register.
-        /// If the Y register was 0x01 then the address would be 0xFF01. and the value stored there would have an ADC operation performed on it and the value would
-        /// be added to the accumulator
-        /// </summary>
-        AbsoluteY = 3,
-        /// <summary>
-        /// In this mode the instruction operates on the accumulator. No operands are needed. 
-        /// </summary>
-        Accumulator = 4,
-        /// <summary>
-        /// In this mode, the value to operate on immediately follows the instruction. IE: Memory byte[] { 0x69, 0x01 } 
-        /// would perform an ADC operation and Add 0x01 directly to the accumulator
-        /// </summary>
-        Immediate = 5,
-        /// <summary>
-        /// No address is needed for this mode. EX: BRK (Break), CLC (Clear Carry Flag) etc
-        /// </summary>
-        Implied = 6,
-        /// <summary>
-        /// In this mode assume the following
-        /// Memory = { 0x61, 0x02, 0x04, 0x00, 0x03 }
-        /// RegisterX = 0x01
-        /// 1. Take the sum of the X Register and the value after the opcode 0x01 + 0x01 = 0x02. 
-        /// 2. Starting at position 0x02 get an address (0x04,0x00) = 0x0004
-        /// 3. Perform the ADC operation and Add the value at 0x0005 to the accumulator
-        /// Note: if the Zero Page address is greater than 0xff then roll over the value. IE 0x101 rolls over to 0x01
-        /// </summary>
-        IndirectX = 7,
-        /// <summary>
-        /// In this mode assume the following
-        /// Memory = { 0x61, 0x02, 0x04, 0x00, 0x03 }
-        /// RegisterY = 0x01
-        /// 1. Starting at position 0x02 get an address (0x04,0x00) = 0x0004 
-        /// 2. Take the sum of the Y Register and the absolute address 0x01+0x0004 = 0x0005
-        /// 3. Perform the ADC operation and Add the value at 0x0005 to the accumulator
-        /// Note: if the address is great that 0xffff then roll over IE: 0x10001 rolls over to 0x01
-        /// </summary>
-        IndirectY = 8,
-        /// <summary>
-        /// JMP is the only operation that uses this mode. In this mode an absolute address is specified that points to the location of the absolute address we want to jump to.
-        /// </summary>
-        Indirect = 9,
-        /// <summary>
-        /// This Mode Changes the PC. It allows the program to change the location of the PC by 127 in either direction.
-        /// </summary>
-        Relative = 10,
-        /// <summary>
-        /// In this mode, a zero page address of the value to operate on is specified. This mode can only operation on values between 0x0 and 0xFF, or those that sit on the zero page of memory. IE: Memory byte[] { 0x69, 0x02, 0x01 } 
-        /// would perform an ADC operation and Add 0x01 directly to the Accumulator
-        /// </summary>
-        ZeroPage = 11,
-        /// <summary>
-        /// In this mode, a zero page address of the value to operate on is specified, however the value of the X register is added to the address IE: Memory byte[] { 0x86, 0x02, 0x01, 0x67, 0x04, 0x01 } 
-        /// In this example we store a value of 0x01 into the X register, then we would perform an ADC operation using the addres of 0x04+0x01=0x05 and Add the result of 0x01 directly to the Accumulator
-        /// </summary>
-        ZeroPageX = 12,
-        /// <summary>
-        /// This works the same as ZeroPageX except it uses the Y register instead of the X register.
-        /// </summary>
-        ZeroPageY = 13,
     }
 }

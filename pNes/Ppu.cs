@@ -36,10 +36,6 @@ namespace pNes
         private byte yScroll;
         private byte readBuffer;
 
-        private byte renderTile0;
-        private byte renderTile1;
-        private byte bufferTile0;
-        private byte bufferTile1;
         private byte tileAttribute;
         private byte bufferTileAttribute;
         private int tileData0;
@@ -69,6 +65,7 @@ namespace pNes
         private bool oddFrame = false;
         private bool frameReady = false;
         private bool sprite0evaluated = false;
+        
 
         public bool FrameReady { get { bool value = frameReady; frameReady = false; return value; } }
 
@@ -84,6 +81,8 @@ namespace pNes
         {
 
             int currentDot = ppuCycles % 341;
+            ppuCycles++;
+
             FetchTimer(currentDot);
             BgRenderer(currentDot);
             
@@ -94,6 +93,10 @@ namespace pNes
             {
                 inVblank = true;
                 frameReady = true;
+                if(vblank_NMI)
+                {
+                    _core.NonMaskableIntterupt();
+                }
             }
             if (currentScanline == 261 && currentDot == 1)
             {
@@ -112,8 +115,10 @@ namespace pNes
                 if (bgEnabled || spritesEnabled)
                 {
                     ppuAddress = tempPpuAddress;
-
-                }  
+                    if (oddFrame && currentDot == 304)
+                        ppuCycles++;
+                }
+               
             }
             if (currentDot == 340)
             {
@@ -129,13 +134,10 @@ namespace pNes
                 {
                     currentScanline = 0;
                     ppuCycles = 0;
-                    if (oddFrame)
-                        ppuCycles++;
+                    
                 }
 
             }
-            ppuCycles++;
-
         }
 
         private void SpriteEvalution()
@@ -149,7 +151,9 @@ namespace pNes
                     byte ypos = oam[i];
                     if (currentScanline >= (ypos + 1) && currentScanline <= ((ypos + 1) + (largeSprites ? 15 : 7)) && ypos != 0)
                     {
-                        if (i == 0 && !sprite0Hit) { sprite0evaluated = true; }
+                        if (i == 0 && !sprite0Hit) {
+                            sprite0evaluated = true;
+                        }
                         if (numberOfSprites < 8)
                         {
                             for (int j = 0; j < 4; j++)
@@ -180,7 +184,7 @@ namespace pNes
                     bool flipX = ((secondaryOam[i + 2] >> 6) & 0x1) != 0;
                     bool flipY = ((secondaryOam[i + 2] >> 7) & 0x1) != 0;
                     int xpos = secondaryOam[i + 3];
-                    int row = flipY ? (7 - currentScanline - (ypos + 1)) : currentScanline - (ypos + 1);
+                    int row = flipY ? 7 - (currentScanline - (ypos + 1)) : currentScanline - (ypos + 1);
                     int tileAddress = ((secondaryOam[i + 1] * 0x10) + row) | spriteTableAdress;
 
                     byte tileData0 = _cart.PpuRead(tileAddress);
@@ -200,16 +204,9 @@ namespace pNes
                             bit1 = (tileData1 >> 7 - j) & 0x1;
                         }
                         int pixel = 0x10 | (palette << 2) | (bit1 << 1) | bit0;
-                        if (sprite0evaluated && i == 0)
-                        {
-                            if ((pixel & 3) != 0 && (scanlinebuffer[xpos + j] & 3) != 0 && bgEnabled)
-                            {
-                                sprite0Hit = true;
-                                sprite0evaluated = false;
-                            }
-                        }
+                        if(xpos + j > (scanlinebuffer.Length - 1)) { break; }
                         if (behindBg && (scanlinebuffer[xpos + j] & 3) != 0) { continue; }
-                        if ((pixel & 0x3) != 0 && (xpos + j) < scanlinebuffer.Length)
+                        if ((pixel & 0x3) != 0 && (xpos + j) < (scanlinebuffer.Length - 1))
                         {
                             scanlinebuffer[xpos + j] = (byte)pixel;
                         }
@@ -258,28 +255,95 @@ namespace pNes
                 int pixelplace = (currentDot % 8) + fineX;
                 pixel |= (byte)((tileData0 >> (15 - pixelplace)) & 0x1);
                 pixel |= (byte)(((tileData1 >> (15 - pixelplace)) & 0x1) << 1);
-                if ((ppuAddress  & 64) != 64)
+                if(sprite0evaluated)
                 {
-                    if ((ppuAddress  & 2) == 2)
+                    int xpos = secondaryOam[3];
+                    if (currentDot >= xpos && currentDot <= (xpos + 7))
                     {
-                        pixel |= (byte)((tileAttribute & 0x3) << 2);
+                        int ypos = secondaryOam[0];
+                        bool flipX = ((secondaryOam[2] >> 6) & 0x1) != 0;
+                        bool flipY = ((secondaryOam[2] >> 7) & 0x1) != 0;
+                        
+                        int row = flipY ? 7 - (currentScanline - (ypos + 1)) : currentScanline - (ypos + 1);
+                        int tileAddress = ((secondaryOam[1] * 0x10) + row) | spriteTableAdress;
+
+                        byte tileData0 = _cart.PpuRead(tileAddress);
+                        byte tileData1 = _cart.PpuRead(tileAddress + 8);
+                        int bit0 = 0;
+                        int bit1 = 0;
+                        for (int j = 0; j < 8; j++)
+                        {
+                            if (flipX)
+                            {
+                                bit0 = (tileData0 >> j) & 0x1;
+                                bit1 = (tileData1 >> j) & 0x1;
+                            }
+                            else
+                            {
+                                bit0 = (tileData0 >> 7 - j) & 0x1;
+                                bit1 = (tileData1 >> 7 - j) & 0x1;
+                            }
+                            int sprite0pixel = (bit1 << 1) | bit0;
+
+                            if ((pixel & 3) != 0 && sprite0pixel != 0)
+                            {
+                                sprite0Hit = true;
+                                sprite0evaluated = false;
+                            }
+                        }
+                    }
+                    }
+                if(pixelplace > 7)
+                {
+                    if (((ppuAddress + 1)  & 64) != 64)
+                    {
+                        if (((ppuAddress + 1) & 2) == 2)
+                        {
+                            pixel |= (byte)((bufferTileAttribute & 0x3) << 2);
+                        }
+                        else
+                        {
+                            pixel |= (byte)(((bufferTileAttribute >> 2) & 0x3) << 2);
+                        }
                     }
                     else
                     {
-                        pixel |= (byte)(((tileAttribute >> 2) & 0x3) << 2);
+                        if (((ppuAddress + 1) & 2) == 2)
+                        {
+                            pixel |= (byte)(((bufferTileAttribute >> 4) & 0x3) << 2);
+                        }
+                        else
+                        {
+                            pixel |= (byte)(((bufferTileAttribute >> 6) & 0x3) << 2);
+                        }
                     }
                 }
                 else
                 {
-                    if ((ppuAddress & 2) == 2)
+                    if ((ppuAddress & 64) != 64)
                     {
-                        pixel |= (byte)(((tileAttribute >> 4) & 0x3) << 2);
+                        if ((ppuAddress & 2) == 2)
+                        {
+                            pixel |= (byte)((tileAttribute & 0x3) << 2);
+                        }
+                        else
+                        {
+                            pixel |= (byte)(((tileAttribute >> 2) & 0x3) << 2);
+                        }
                     }
                     else
                     {
-                        pixel |= (byte)(((tileAttribute >> 6) & 0x3) << 2);
+                        if ((ppuAddress & 2) == 2)
+                        {
+                            pixel |= (byte)(((tileAttribute >> 4) & 0x3) << 2);
+                        }
+                        else
+                        {
+                            pixel |= (byte)(((tileAttribute >> 6) & 0x3) << 2);
+                        }
                     }
                 }
+                
                 if ((pixel & 3) == 0) pixel = 0;
                 scanlinebuffer[currentDot] = pixel;
             }
@@ -297,12 +361,9 @@ namespace pNes
 
             int row = (ppuAddress >> 12) & 0x7;
             tilePointer = ((ReadPpuMemory(tileAddress) * 0x10) + row) | backgroundTableAdress;
+
             tileAttribute = bufferTileAttribute;
-            renderTile0 = bufferTile0;
-            renderTile1 = bufferTile1;
             bufferTileAttribute = ReadPpuMemory(attributeAddress);
-            bufferTile0 = ReadPpuMemory(tilePointer);
-            bufferTile1 = ReadPpuMemory(tilePointer + 8);
             tileData0 = (tileData0 & 0xFF) << 8;
             tileData1 = (tileData1 & 0xFF) << 8;
             tileData0 |= ReadPpuMemory(tilePointer);
@@ -318,7 +379,10 @@ namespace pNes
             {
                 ppuAddress += 1;              // increment coarse X
             }
-               
+
+     
+
+
         }
         private void IncrementY()
         {

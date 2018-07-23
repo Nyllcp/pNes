@@ -58,10 +58,11 @@ namespace pNes
                     chrRom = new byte[chrRomInfo];
                     byte flags6 = reader.ReadByte();
                     byte flags7 = reader.ReadByte();
+                    byte prgRamSize = reader.ReadByte();
 
                     verticalMirroring = (flags6 & 1) != 0;
                     prgRamEnabled =  ((flags6 >> 1) & 1) != 0;
-                    prgRam = prgRamEnabled ? new byte[prgRamBankSize] : null;
+                    prgRam = prgRamSize == 0 ? new byte[prgRamBankSize] : new byte[prgRamBankSize * prgRamSize];
                     trainer = ((flags6 >> 2) & 1) != 0;
                     ignoreMirroring = ((flags6 >> 3) & 1) != 0;
                     //ppuRam = ignoreMirroring ? new byte[0x1000] : null;
