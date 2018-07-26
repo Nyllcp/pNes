@@ -184,11 +184,27 @@ namespace pNes
                     bool flipX = ((secondaryOam[i + 2] >> 6) & 0x1) != 0;
                     bool flipY = ((secondaryOam[i + 2] >> 7) & 0x1) != 0;
                     int xpos = secondaryOam[i + 3];
-                    int row = flipY ? 7 - (currentScanline - (ypos + 1)) : currentScanline - (ypos + 1);
-                    int tileAddress = ((secondaryOam[i + 1] * 0x10) + row) | spriteTableAdress;
-
-                    byte tileData0 = _cart.PpuRead(tileAddress);
-                    byte tileData1 = _cart.PpuRead(tileAddress + 8);
+                    byte tileNumber = secondaryOam[i + 1];
+                    byte tileData0 = 0;
+                    byte tileData1 = 0;
+                    if (largeSprites)
+                    {
+                        int row = flipY ? 15 - (currentScanline - (ypos + 1)) : currentScanline - (ypos + 1);
+                        int tileAddress = (tileNumber & 1) != 0 ? 0x1000 : 0x0;
+                        tileNumber &= 0xFE;
+                        tileAddress = (tileNumber * 0x10) + row;
+                        
+                        tileData0 = _cart.PpuRead(tileAddress);
+                        tileData1 = _cart.PpuRead(tileAddress + 8);
+                    }
+                    else
+                    {
+                        int row = flipY ? 7 - (currentScanline - (ypos + 1)) : currentScanline - (ypos + 1);
+                        int tileAddress = ((tileNumber * 0x10) + row) | spriteTableAdress;
+                        tileData0 = _cart.PpuRead(tileAddress);
+                        tileData1 = _cart.PpuRead(tileAddress + 8);
+                    }
+                    
                     int bit0 = 0;
                     int bit1 = 0;
                     for (int j = 0; j < 8; j++)
@@ -432,7 +448,7 @@ namespace pNes
                 for (int i = 0; i < oam.Length; i++)
                 {
                     oam[i] = _core.ReadMemory(tempAdress++);
-                    //should stall cpu for 514 cycles
+
                 }
                 return;
             }

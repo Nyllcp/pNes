@@ -27,6 +27,8 @@ namespace pNes
         private bool trainer = false;
         private bool ignoreMirroring = false;
 
+        private int selctedBank = 0;
+
         public Cart()
         {
 
@@ -43,8 +45,8 @@ namespace pNes
                     reader.ReadByte() == 0x1A)
                 {
                     int prgRomInfo = reader.ReadByte();
-                    prgRomInfo = prgRomInfo != 0 ? prgRomBankSize * prgRomInfo : prgRomBankSize;
-                    prgRom = new byte[prgRomInfo];
+                    int prgRomSize = prgRomInfo != 0 ? prgRomBankSize * prgRomInfo : prgRomBankSize;
+                    prgRom = new byte[prgRomSize];
                     int chrRomInfo = reader.ReadByte();
                     if(chrRomInfo == 0)
                     {
@@ -78,6 +80,7 @@ namespace pNes
                     }
                     for (int i = 0; i < chrRom.Length; i++)
                     {
+                        if (chrRamEnabled) break;
                         chrRom[i] = reader.ReadByte();
                     }
 
@@ -94,12 +97,30 @@ namespace pNes
         }
         public byte ReadCart(int address)
         {
+            if(mapperNumber == 2)
+            {
+                if(address < 0xC000)
+                {
+                    return prgRom[(prgRomBankSize * selctedBank) + (address & (prgRomBankSize - 1))];
+                }
+                else
+                {
+                    return prgRom[(prgRom.Length - prgRomBankSize) + (address & (prgRomBankSize - 1))];
+                }
+            }
             return prgRom[address & (prgRom.Length -1)];
         }
         public void WriteCart(int address, byte data)
         {
             
             //cart writes, todo
+            if(mapperNumber == 2)
+            {
+                if(address > 0x7FFF)
+                {
+                    selctedBank = data & 0xF;
+                }
+            }
         }
 
         public byte PpuRead(int address)
@@ -111,7 +132,10 @@ namespace pNes
         {
             if (address < 0x2000)
             {
-                //chrrom write
+                if(chrRamEnabled)
+                {
+                    chrRom[address] = data;
+                }
             }
           
         }

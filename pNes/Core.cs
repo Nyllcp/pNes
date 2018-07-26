@@ -25,6 +25,9 @@ namespace pNes
 
         public uint[] Frame { get { return _ppu.Frame; } }
         public byte Pad1 { get { return pad1; } set { pad1 = value; } }
+
+        public byte[] Samples { get { return _apu.Samples; } }
+        public int NoOfSamples { get { int value = _apu.NumberOfSamples; _apu.NumberOfSamples = 0; return value; } }
         
 
         public Core()
@@ -32,7 +35,7 @@ namespace pNes
             _cart = new Cart();
             _cpu = new Processor(this);
             _ppu = new Ppu(_cart,this);
-            _apu = new Apu();
+            _apu = new Apu(this);
         }
 
         public bool LoadRom(string fileName)
@@ -96,6 +99,7 @@ namespace pNes
                 //$4000-$4017	$0018	NES APU and I/O registers
                 //$4018-$401F	$0008	APU and I/O functionality that is normally disabled.See CPU Test Mode.
                 if (address < 0x4014) return _apu.ReadApuRegister(address);
+                if(address == 0x4015) return _apu.ReadApuRegister(address);
                 if (address == 0x4016)
                 {
                     int val = 0;
@@ -141,7 +145,12 @@ namespace pNes
                 //$4000-$4017	$0018	NES APU and I/O registers
                 //$4018-$401F	$0008	APU and I/O functionality that is normally disabled.See CPU Test Mode.
                 if (address < 0x4014) _apu.WriteApuRegister(address, data);
-                else if (address == 0x4014) _ppu.WritePpuRegister(address, data);
+                else if (address == 0x4014)
+                {
+                    _cpu.CycleCountStep += 514; //oam transfer stall cpu for 514 cycles
+                    _ppu.WritePpuRegister(address, data);
+                }
+                else if (address == 0x4015) _apu.WriteApuRegister(address, data);
                 else if (address == 0x4016)
                 {
                     strobingPad = ((data & 1) != 0) ? true : false;
@@ -152,6 +161,7 @@ namespace pNes
             else
             {
                 //$4020-$FFFF $BFE0 Cartridge space: PRG ROM, PRG RAM, and mapper registers (See Note)
+                _cart.WriteCart(address, data);
             }
         }
 

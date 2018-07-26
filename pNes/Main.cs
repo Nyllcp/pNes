@@ -21,7 +21,7 @@ namespace pNes
         private Sprite _sprite;
         private DrawingSurface _drawingSurface;
         private Clock _clock;
-        // private Audio _audio;
+        private Audio _audio;
         private OpenFileDialog _ofd;
         private Core _nes;
 
@@ -65,7 +65,7 @@ namespace pNes
         private void InitSFML()
         {
             _clock = new Clock();
-            //_audio = new Audio();
+            _audio = new Audio();
             _texture = new Texture(nesWidth, nesHeight);
             _texture.Smooth = false;
             _sprite = new Sprite(_texture);
@@ -87,7 +87,12 @@ namespace pNes
                 _drawingSurface.Select();
                 Input();
                 _nes.RunOneFrame();
-               
+                _audio.AddSample(_nes.Samples, _nes.NoOfSamples, true);
+                while (_audio.GetBufferedBytes() > (((44100) / 60 * 2) * 4))
+                {
+                    System.Threading.Thread.Sleep(1);
+                    //Max 4 frames of audio lag, cant go lower probably cause of thread sleep beeing useless.
+                }
                 UpdateFrameRGB(_nes.Frame);
                 _texture.Update(_frame);
                 _window.Clear();

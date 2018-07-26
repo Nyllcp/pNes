@@ -129,6 +129,7 @@ namespace pNes
         /// Set to true when an IRQ has occurred and is being processed by the CPU
         public bool TriggerIRQ { get; private set; }
         #endregion
+        public int CycleCountStep { get { return _cycleCountStep; } set { _cycleCountStep = value; } }
 
         #region Public Methods
         /// <summary>
@@ -173,12 +174,12 @@ namespace pNes
         public void NextStep()
         {
 
-            //Have to read this first otherwise it causes tests to fail on a NES
+            
             if (_cycleCountStep-- > 0)
             {
                 return;
             }
-
+            //Have to read this first otherwise it causes tests to fail on a NES
             CurrentOpCode = ReadMemoryValue(ProgramCounter);
 
             ProgramCounter++;
