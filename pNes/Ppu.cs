@@ -171,20 +171,21 @@ namespace pNes
         {
             if (spritesEnabled && currentScanline != 0 && currentScanline <= 239)
             {
+                Array.Reverse(secondaryOam);
                 for (int i = 0; i < secondaryOam.Length; i += 4)
                 {
-                    int ypos = secondaryOam[i];
+                    int ypos = secondaryOam[i + 3];
                     if (ypos > 0xEF)
                     {
                         continue;
                     }
 
-                    int palette = secondaryOam[i + 2] & 0x3;
-                    bool behindBg = ((secondaryOam[i + 2] >> 5) & 0x1) != 0;
-                    bool flipX = ((secondaryOam[i + 2] >> 6) & 0x1) != 0;
-                    bool flipY = ((secondaryOam[i + 2] >> 7) & 0x1) != 0;
-                    int xpos = secondaryOam[i + 3];
-                    byte tileNumber = secondaryOam[i + 1];
+                    int palette = secondaryOam[i + 1] & 0x3;
+                    bool behindBg = ((secondaryOam[i + 1] >> 5) & 0x1) != 0;
+                    bool flipX = ((secondaryOam[i + 1] >> 6) & 0x1) != 0;
+                    bool flipY = ((secondaryOam[i + 1] >> 7) & 0x1) != 0;
+                    int xpos = secondaryOam[i];
+                    byte tileNumber = secondaryOam[i + 2];
                     byte tileData0 = 0;
                     byte tileData1 = 0;
                     if (largeSprites)
@@ -225,11 +226,9 @@ namespace pNes
                         }
                         int pixel = 0x10 | (palette << 2) | (bit1 << 1) | bit0;
                         if(xpos + j > (scanlinebuffer.Length - 1)) { break; }
+                        if((pixel & 0x3) == 0) { continue; }
                         if (behindBg && (scanlinebuffer[xpos + j] & 3) != 0) { continue; }
-                        if ((pixel & 0x3) != 0 && (xpos + j) < (scanlinebuffer.Length - 1))
-                        {
-                            scanlinebuffer[xpos + j] = (byte)pixel;
-                        }
+                        scanlinebuffer[xpos + j] = (byte)pixel;
 
                     }
 

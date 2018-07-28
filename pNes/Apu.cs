@@ -56,13 +56,12 @@ namespace pNes
                 FrameSequencer();
                 _pulseChannel0.Tick();
                 _pulseChannel1.Tick();
-                _noiseChannel.Tick();
+                _noiseChannel.Tick();  
             }
             
             _triangleChannel.Tick();
             _dpcm.Tick();
             apuEveryOtherCycle = !apuEveryOtherCycle;
-            apuCycles++;
             sampleCycles++;
             if (sampleCycles >= (cpuFreq) / SAMPLE_RATE) Sample();
         }
@@ -148,7 +147,8 @@ namespace pNes
                 _pulseChannel0.SweepCounter();
                 _pulseChannel1.SweepCounter();
             }
-            
+            apuCycles++;
+
         }
 
         public void WriteApuRegister(int address, byte data)

@@ -71,7 +71,7 @@ namespace pNes
                     sampleBuffer >>= 1;
                 }
                 sampleShiftCounter--;
-                if(sampleShiftCounter == 0)
+                if(sampleShiftCounter >= 0)
                 {
                     sampleShiftCounter = 8;
                     if (sampleLenghtCounter >= 0)

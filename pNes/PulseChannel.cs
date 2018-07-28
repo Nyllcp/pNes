@@ -68,7 +68,7 @@ namespace pNes
                 dutyCounter &= 7;
                 if (lenghtLoadCounter > 0 && validSweep)
                 {
-                    Sample = (dutyCycles[duty] >> dutyCounter++) != 0 ? currentVolume : 0;
+                    Sample = ((dutyCycles[duty] >> dutyCounter++) & 1) != 0 ? currentVolume : 0;
                 }
                 else Sample = 0;
                 

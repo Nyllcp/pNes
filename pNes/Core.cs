@@ -117,10 +117,6 @@ namespace pNes
         public void WriteMemory(int address, byte data)
         {
             address &= 0xFFFF;
-            if(address == 0x0c)
-            {
-
-            }
             if (address < 0x2000)
             {
                 ram[address & 0x7FF] = data;
