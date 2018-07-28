@@ -9,7 +9,7 @@ namespace pNes
     class NoiseChannel
     {
         private const int cpuFreq = 1789773;
-        private int frequency;
+
 
         private byte[] regs = new byte[4];
         //$400C	--lc.vvvv	Length counter halt, constant volume/envelope flag, and volume/envelope divider period (write)
@@ -23,10 +23,7 @@ namespace pNes
 
         //$400F	llll.l---	Length counter load and envelope restart(write)
         private int lenghtLoadCounter;
-
-        
-
-        private bool channelEnabled = false;
+        private bool lenghtEnable = false;
         private bool envelopeStart = false;
 
 
@@ -50,7 +47,7 @@ namespace pNes
 
         public bool LenghtCounterNotZero()
         {
-            return lenghtLoadCounter != 0;
+            return lenghtLoadCounter > 0;
         }
 
         public int Sample;
@@ -61,12 +58,12 @@ namespace pNes
         {
             if (timerCounter-- <= 0)
             {
-                timerCounter = timerPeriod[period];
+                timerCounter = timerPeriod[period] + 1;
                 currentVolume = constantVolume ? volume : envelopeVolume;
                 int shiftBit = mode1 ? (shiftRegister & 1) ^ ((shiftRegister >> 5) & 1) : (shiftRegister & 1) ^ ((shiftRegister >> 1) & 1);
                 shiftRegister >>= 1;
                 shiftRegister |= shiftBit << 14;
-                if(lenghtLoadCounter != 0 && channelEnabled)
+                if(lenghtLoadCounter > 0)
                 {
                     Sample = (shiftRegister & 1) != 0 ? currentVolume : 0;
                 }
@@ -74,10 +71,10 @@ namespace pNes
             }
         }
 
-        public void EnableChannel(bool enable)
+        public void EnableChannel(bool value)
         {
-            channelEnabled = enable;
-            if (!channelEnabled) lenghtLoadCounter = 0;
+            lenghtEnable = value;
+            if (!lenghtEnable) lenghtLoadCounter = 0;
         }
 
         public void EnvelopeCounter()
@@ -97,7 +94,7 @@ namespace pNes
                     {
                         envelopeVolume--;
                     }
-                    if (lenghtCounterHalt && envelopeVolume == 0)
+                    else if (lenghtCounterHalt)
                     {
                         envelopeVolume = 0xF;
                     }
@@ -131,7 +128,10 @@ namespace pNes
                     break;
                 case 3:
                     regs[3] = data;
-                    lenghtLoadCounter = lenghtCounterLookup[(data >> 3)];
+                    if(lenghtEnable)
+                    {
+                        lenghtLoadCounter = lenghtCounterLookup[(data >> 3)];
+                    }
                     envelopeStart = true;
                     break;
             }

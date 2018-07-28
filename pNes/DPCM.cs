@@ -11,8 +11,6 @@ namespace pNes
 
         private Core _core;
 
-        private bool channelEnabled = false;
-
         //$4010	IL--.RRRR	Flags and Rate (write)
         private bool interruptEnable = false;
         private bool loopFlag = false;
@@ -23,8 +21,8 @@ namespace pNes
         private int sampleShiftCounter;
 
         //$4012	AAAA.AAAA Sample address(write) Sample address = %11AAAAAA.AA000000 = $C000 + (A * 64)
-        private int sampleAdress;
-        private int fetchAdress;
+        private int sampleAdress = 0xC000;
+        private int fetchAdress = 0xC000;
         private byte sampleBuffer;
 
 
@@ -33,8 +31,10 @@ namespace pNes
         private int sampleLenght;
         public int sampleLenghtCounter;
 
-        public int Sample;
+        public int Sample = 0;
         public bool iFlag = false;
+
+        private bool bufferAvailable = false;
 
         private int timerCounter;
 
@@ -50,22 +50,43 @@ namespace pNes
         {
             if(timerCounter-- <= 0)
             {
-                if (sampleShiftCounter == 7)
+                timerCounter = timerPeriodLookup[rate] + 1;
+
+                if (bufferAvailable)
                 {
-                    sampleShiftCounter = 0;
-                    if (sampleLenghtCounter != 0)
+                    if ((sampleBuffer & 1) != 0)
                     {
-                        fetchAdress &= 0x7FFF + 0x8000;
-                        channelEnabled = false;
-                        sampleBuffer = _core.ReadMemory(fetchAdress);
-                        fetchAdress++;
-                        sampleLenghtCounter--;
-                        if (sampleLenghtCounter == 0)
+                        if (Sample <= 125)
                         {
-                            if (loopFlag)
+                            Sample += 2;
+                        }
+                    }
+                    else
+                    {
+                        if (Sample >= 2)
+                        {
+                            Sample -= 2;
+                        }
+                    }
+                    sampleBuffer >>= 1;
+                }
+                sampleShiftCounter--;
+                if(sampleShiftCounter == 0)
+                {
+                    sampleShiftCounter = 8;
+                    if (sampleLenghtCounter >= 0)
+                    {
+                        bufferAvailable = true;
+                        sampleBuffer = _core.ReadMemory(fetchAdress);
+                        if (fetchAdress >= 0xFFFF) fetchAdress = 0x8000;
+                        else fetchAdress++;
+                        sampleLenghtCounter--;
+                        if(sampleLenghtCounter == 0)
+                        {
+                            if(loopFlag)
                             {
-                                fetchAdress = sampleAdress;
                                 sampleLenghtCounter = sampleLenght;
+                                fetchAdress = sampleAdress;
                             }
                             else
                             {
@@ -74,24 +95,25 @@ namespace pNes
                         }
 
                     }
-                   
+                    else bufferAvailable = false;
+
                 }
-                timerCounter = timerPeriodLookup[rate] / 2;
-                if(channelEnabled)
-                {
-                    Sample = ((sampleBuffer >> sampleShiftCounter++) & 1) != 0 ? Sample + 2 : Sample - 2;
-                    if (Sample > 127) Sample = 127;
-                    if (Sample < 0) Sample = 0;
-                }
-                     
-                
 
             }
         }
 
         public void EnableChannel(bool enable)
         {
-            channelEnabled = enable;
+            if(enable && sampleLenghtCounter <= 0)
+            {
+                fetchAdress = sampleAdress;
+                sampleLenghtCounter = sampleLenght;
+            }
+            else
+            {
+                sampleLenghtCounter = 0;
+                sampleLenght = 0;
+            }
             iFlag = false;
         }
 

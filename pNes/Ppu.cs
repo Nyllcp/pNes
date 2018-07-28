@@ -23,7 +23,7 @@ namespace pNes
 
         private byte[] oam = new byte[0x100];
         private byte[] secondaryOam = new byte[0x20];
-        private byte[] vram = new byte[0x800];
+        //private byte[] vram = new byte[0x800];
         private byte[] scanlinebuffer = new byte[256];
         private uint[] _frame = new uint[nesWidth * nesHeight];
         private byte[] paletteRam = new byte[0x20];
@@ -144,9 +144,9 @@ namespace pNes
         {
             if (spritesEnabled && currentScanline <= 239)
             {
-                secondaryOam = new byte[0x20];
+                secondaryOam = Enumerable.Repeat<Byte>(0xFF, secondaryOam.Length).ToArray();
                 int numberOfSprites = 0;
-                for (int i = 0; i < 0xFF; i += 4)
+                for (int i = 0; i < oam.Length; i += 4)
                 {
                     byte ypos = oam[i];
                     if (currentScanline >= (ypos + 1) && currentScanline <= ((ypos + 1) + (largeSprites ? 15 : 7)) && ypos != 0)
@@ -174,7 +174,7 @@ namespace pNes
                 for (int i = 0; i < secondaryOam.Length; i += 4)
                 {
                     int ypos = secondaryOam[i];
-                    if (ypos == 0)
+                    if (ypos > 0xEF)
                     {
                         continue;
                     }
@@ -191,8 +191,12 @@ namespace pNes
                     {
                         int row = flipY ? 15 - (currentScanline - (ypos + 1)) : currentScanline - (ypos + 1);
                         int tileAddress = (tileNumber & 1) != 0 ? 0x1000 : 0x0;
+                        if(row > 7)
+                        {
+                            row += 8;
+                        }
                         tileNumber &= 0xFE;
-                        tileAddress = (tileNumber * 0x10) + row;
+                        tileAddress |= (tileNumber * 0x10) + row;
                         
                         tileData0 = _cart.PpuRead(tileAddress);
                         tileData1 = _cart.PpuRead(tileAddress + 8);
@@ -256,6 +260,7 @@ namespace pNes
                         ppuAddress &= ~0x400;
                         ppuAddress |= tempPpuAddress & 0x1F;
                         ppuAddress |= tempPpuAddress & 0x400;
+                        oamAddr = 0;
                     }
 
                 }
@@ -447,7 +452,7 @@ namespace pNes
                 int tempAdress = data << 8;
                 for (int i = 0; i < oam.Length; i++)
                 {
-                    oam[i] = _core.ReadMemory(tempAdress++);
+                    WritePpuRegister(0x2004,_core.ReadMemory(tempAdress++));
 
                 }
                 return;
@@ -516,7 +521,8 @@ namespace pNes
             }
             else if(address < 0x3F00)
             {
-                vram[address & 0x7FF] = data;
+                //vram[address & 0x7FF] = data;
+                _cart.PpuWrite(address, data);
             }
             else
             {
@@ -537,7 +543,8 @@ namespace pNes
             }
             else if (address < 0x3F00)
             {
-                return vram[address & 0x7FF];
+                //return vram[address & 0x7FF];
+                return _cart.PpuRead(address);
             }
             else
             {

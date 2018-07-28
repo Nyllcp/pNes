@@ -4,20 +4,26 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.IO;
+using System.IO.Compression;
+
 
 namespace pNes
 {
     class Cart
     {
 
+
         private byte[] prgRom;
         private byte[] chrRom;
         private byte[] prgRam;
         private byte[,] ppuRam = new byte[4,0x400];
 
-        private const int prgRomBankSize = 0x4000;
-        private const int chrRomBankSize = 0x2000;
+        private const int prgRomBankSize16k = 0x4000;
+        private const int chrRomBankSize8k = 0x2000;
+        private const int prgRomBankSize18k = 0x2000;
+        private const int chrRomBankSize4k = 0x1000;
         private const int prgRamBankSize = 0x2000;
+        private const int ppuRamBankSize = 0x400;
 
         private int mapperNumber = 0;
 
@@ -27,7 +33,7 @@ namespace pNes
         private bool trainer = false;
         private bool ignoreMirroring = false;
 
-        private int selctedBank = 0;
+        private int selectedBank = 0;
 
         public Cart()
         {
@@ -36,63 +42,92 @@ namespace pNes
 
         public bool LoadRom(string fileName)
         {
+            BinaryReader _reader;
+            MemoryStream _ms = new MemoryStream();
+
             bool success = false;
-            using (BinaryReader reader = new BinaryReader(File.Open(fileName, FileMode.Open)))
+            if (Path.GetExtension(fileName) == ".zip")
             {
-                if (reader.ReadByte() == 'N' &&
-                    reader.ReadByte() == 'E' &&
-                    reader.ReadByte() == 'S' &&
-                    reader.ReadByte() == 0x1A)
+                using (var _zip = ZipFile.OpenRead(fileName))
                 {
-                    int prgRomInfo = reader.ReadByte();
-                    int prgRomSize = prgRomInfo != 0 ? prgRomBankSize * prgRomInfo : prgRomBankSize;
-                    prgRom = new byte[prgRomSize];
-                    int chrRomInfo = reader.ReadByte();
-                    if(chrRomInfo == 0)
+                    foreach (var entry in _zip.Entries)
                     {
-                        chrRamEnabled = true;
-                        chrRomInfo = chrRomBankSize;
+                        if (Path.GetExtension(entry.Name) == ".nes")
+                        {
+                            using (var stream = entry.Open())
+                            {
+                                stream.CopyTo(_ms);
+                            }
+                            break;
+                        }    
                     }
-                    else
-                    {
-                        chrRomInfo = chrRomInfo * chrRomBankSize;
-                    }
-                    chrRom = new byte[chrRomInfo];
-                    byte flags6 = reader.ReadByte();
-                    byte flags7 = reader.ReadByte();
-                    byte prgRamSize = reader.ReadByte();
+                    _reader = new BinaryReader(_ms);
+                }
+            }
+            else if (Path.GetExtension(fileName) == ".nes")
+            {
+                _reader = new BinaryReader(File.Open(fileName, FileMode.Open));
+            }
+            else
+            {
+                return false;
+            }
 
-                    verticalMirroring = (flags6 & 1) != 0;
-                    prgRamEnabled =  ((flags6 >> 1) & 1) != 0;
-                    prgRam = prgRamSize == 0 ? new byte[prgRamBankSize] : new byte[prgRamBankSize * prgRamSize];
-                    trainer = ((flags6 >> 2) & 1) != 0;
-                    ignoreMirroring = ((flags6 >> 3) & 1) != 0;
-                    //ppuRam = ignoreMirroring ? new byte[0x1000] : null;
-                    mapperNumber = (flags6 >> 4) | (flags7 & 0xF0);
-
-                    int prgStartByte = trainer ? 0x210 : 0x10;
-
-                    reader.BaseStream.Seek(prgStartByte, SeekOrigin.Begin);
-
-                    for(int i = 0; i < prgRom.Length; i++)
-                    {
-                        prgRom[i] = reader.ReadByte();
-                    }
-                    for (int i = 0; i < chrRom.Length; i++)
-                    {
-                        if (chrRamEnabled) break;
-                        chrRom[i] = reader.ReadByte();
-                    }
-
-
-                    success = true;
+            _reader.BaseStream.Seek(0, SeekOrigin.Begin);
+            if (_reader.ReadByte() == 'N' &&
+                _reader.ReadByte() == 'E' &&
+                _reader.ReadByte() == 'S' &&
+                _reader.ReadByte() == 0x1A)
+                {
+                int prgRomInfo = _reader.ReadByte();
+                int prgRomSize = prgRomInfo != 0 ? prgRomBankSize16k * prgRomInfo : prgRomBankSize16k;
+                prgRom = new byte[prgRomSize];
+                int chrRomInfo = _reader.ReadByte();
+                if (chrRomInfo == 0)
+                {
+                    chrRamEnabled = true;
+                    chrRomInfo = chrRomBankSize8k;
                 }
                 else
                 {
-                    success = false;
+                    chrRomInfo = chrRomInfo * chrRomBankSize8k;
                 }
-            }
+                chrRom = new byte[chrRomInfo];
+                byte flags6 = _reader.ReadByte();
+                byte flags7 = _reader.ReadByte();
+                byte prgRamSize = _reader.ReadByte();
 
+                verticalMirroring = (flags6 & 1) != 0;
+                prgRamEnabled = ((flags6 >> 1) & 1) != 0;
+                prgRam = prgRamSize == 0 ? new byte[prgRamBankSize] : new byte[prgRamBankSize * prgRamSize];
+                trainer = ((flags6 >> 2) & 1) != 0;
+                ignoreMirroring = ((flags6 >> 3) & 1) != 0;
+                //ppuRam = ignoreMirroring ? new byte[0x1000] : null;
+                mapperNumber = (flags6 >> 4) | (flags7 & 0xF0);
+
+                int prgStartByte = trainer ? 0x210 : 0x10;
+
+                _reader.BaseStream.Seek(prgStartByte, SeekOrigin.Begin);
+
+                for (int i = 0; i < prgRom.Length; i++)
+                {
+                    prgRom[i] = _reader.ReadByte();
+                }
+                for (int i = 0; i < chrRom.Length; i++)
+                {
+                    if (chrRamEnabled) break;
+                    chrRom[i] = _reader.ReadByte();
+                }
+
+
+                success = true;
+            }
+            else
+            {
+                success = false;
+            }
+            _ms.Close();
+            _reader.Close();
             return success;
         }
         public byte ReadCart(int address)
@@ -101,11 +136,11 @@ namespace pNes
             {
                 if(address < 0xC000)
                 {
-                    return prgRom[(prgRomBankSize * selctedBank) + (address & (prgRomBankSize - 1))];
+                    return prgRom[(prgRomBankSize16k * selectedBank) + (address & (prgRomBankSize16k - 1))];
                 }
                 else
                 {
-                    return prgRom[(prgRom.Length - prgRomBankSize) + (address & (prgRomBankSize - 1))];
+                    return prgRom[(prgRom.Length - prgRomBankSize16k) + (address & (prgRomBankSize16k - 1))];
                 }
             }
             return prgRom[address & (prgRom.Length -1)];
@@ -118,14 +153,41 @@ namespace pNes
             {
                 if(address > 0x7FFF)
                 {
-                    selctedBank = data & 0xF;
+                    selectedBank = data & 0xF;
                 }
             }
         }
 
         public byte PpuRead(int address)
         {
-            return chrRom[address & (chrRom.Length - 1)];    
+            if (address < 0x2000)
+            {
+                return chrRom[address & (chrRom.Length - 1)];
+            }
+            else if (address < 0x3F00)
+            {
+                if (verticalMirroring)
+                { 
+                    switch ((address >> 10) & 3)
+                    {
+                        case 0: return ppuRam[0, address & ppuRamBankSize - 1]; 
+                        case 1: return ppuRam[1, address & ppuRamBankSize - 1];
+                        case 2: return ppuRam[0, address & ppuRamBankSize - 1]; 
+                        case 3: return ppuRam[1, address & ppuRamBankSize - 1]; 
+                    }
+                }
+                else
+                {
+                    switch ((address >> 10) & 3)
+                    {
+                        case 0: return ppuRam[0, address & ppuRamBankSize - 1];
+                        case 1: return ppuRam[0, address & ppuRamBankSize - 1];
+                        case 2: return ppuRam[1, address & ppuRamBankSize - 1];
+                        case 3: return ppuRam[1, address & ppuRamBankSize - 1];
+                    }
+                }
+            }
+            return 0;
         }
 
         public void PpuWrite(int address, byte data)
@@ -136,6 +198,30 @@ namespace pNes
                 {
                     chrRom[address] = data;
                 }
+            }
+            else if(address < 0x3F00)
+            {
+                if(verticalMirroring)
+                {
+                    switch ((address >> 10) & 3)
+                    {
+                        case 0: ppuRam[0, address & ppuRamBankSize - 1] = data; break;
+                        case 1: ppuRam[1, address & ppuRamBankSize - 1] = data; break;
+                        case 2: ppuRam[0, address & ppuRamBankSize - 1] = data; break;
+                        case 3: ppuRam[1, address & ppuRamBankSize - 1] = data; break;
+                    }
+                }
+                else
+                {
+                    switch ((address >> 10) & 3)
+                    {
+                        case 0: ppuRam[0, address & ppuRamBankSize - 1] = data; break;
+                        case 1: ppuRam[0, address & ppuRamBankSize - 1] = data; break;
+                        case 2: ppuRam[1, address & ppuRamBankSize - 1] = data; break;
+                        case 3: ppuRam[1, address & ppuRamBankSize - 1] = data; break;
+                    }
+                }
+             
             }
           
         }

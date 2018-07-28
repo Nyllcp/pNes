@@ -29,16 +29,18 @@ namespace pNes
 
         private bool iFlag = false;
         private bool triggerChannels = false;
+        private bool apuEveryOtherCycle = false;
+
 
         private bool mode0 = true;
-        private bool disableInterrupt = true;
+        private bool disableInterrupt = false;
 
         public bool IFlag { get { bool value = iFlag || _dpcm.iFlag; iFlag = false; return value; } }
 
         public Apu(Core core)
         {
-            _pulseChannel0 = new PulseChannel();
-            _pulseChannel1 = new PulseChannel();
+            _pulseChannel0 = new PulseChannel(true);
+            _pulseChannel1 = new PulseChannel(false);
             _triangleChannel = new TriangleChannel();
             _noiseChannel = new NoiseChannel();
             _dpcm = new DPCM(core);
@@ -49,15 +51,20 @@ namespace pNes
 
         public void Tick()
         {
-            FrameSequencer();
-            _pulseChannel0.Tick();
-            _pulseChannel1.Tick();
+            if(apuEveryOtherCycle)
+            {
+                FrameSequencer();
+                _pulseChannel0.Tick();
+                _pulseChannel1.Tick();
+                _noiseChannel.Tick();
+            }
+            
             _triangleChannel.Tick();
-            _noiseChannel.Tick();
             _dpcm.Tick();
+            apuEveryOtherCycle = !apuEveryOtherCycle;
             apuCycles++;
             sampleCycles++;
-            if (sampleCycles >= ((cpuFreq / 2) / SAMPLE_RATE)) Sample();
+            if (sampleCycles >= (cpuFreq) / SAMPLE_RATE) Sample();
         }
 
         private void Sample()
@@ -66,7 +73,7 @@ namespace pNes
             if (NumberOfSamples * 2 > Samples.Length - 2) return;
             int sample = 0;
             int pulseOut = _pulseLookup[_pulseChannel0.Sample + _pulseChannel1.Sample];
-            int tndOut = _tndLookup[(_triangleChannel.Sample * 3) + (_noiseChannel.Sample * 2) ]; // [3 * triangle + 2 * noise + dmc]
+            int tndOut = _tndLookup[(_triangleChannel.Sample * 3) + (_noiseChannel.Sample * 2) + _dpcm.Sample ]; // [3 * triangle + 2 * noise + dmc]
 
             sample = pulseOut + tndOut;
 
@@ -170,10 +177,10 @@ namespace pNes
                 case 0x12:
                 case 0x13: _dpcm.WriteReg(address, data); break;
                 case 0x15:
-                    _pulseChannel0.EnableChannel((data & 1) != 0);
-                    _pulseChannel1.EnableChannel(((data >> 1) & 1) != 0);
-                    _triangleChannel.EnableChannel(((data >> 2) & 1) != 0);
-                    _noiseChannel.EnableChannel(((data >> 3) & 1) != 0);
+                    _pulseChannel0.EnableChannel(((data & 1) != 0));
+                    _pulseChannel1.EnableChannel((((data >> 1) & 1) != 0));
+                    _triangleChannel.EnableChannel((((data >> 2) & 1) != 0));
+                    _noiseChannel.EnableChannel((((data >> 3) & 1) != 0));
                     _dpcm.EnableChannel(((data >> 4) & 1) != 0);
                     break;
                 case 0x17:
@@ -195,7 +202,7 @@ namespace pNes
                     int value = _dpcm.iFlag == true ? 1 << 7 : 0;
                     value |= iFlag == true ? 1 << 6 : 0;
                     iFlag = false;
-                    value |= (_dpcm.sampleLenghtCounter != 0) ? 1 << 4 : 0;
+                    value |= (_dpcm.sampleLenghtCounter > 0) ? 1 << 4 : 0;
                     value |= _noiseChannel.LenghtCounterNotZero() ? 1 << 3 : 0;
                     value |= _triangleChannel.LenghtCounterNotZero() ? 1 << 2 : 0;
                     value |= _pulseChannel1.LenghtCounterNotZero() ? 1 << 1 : 0;

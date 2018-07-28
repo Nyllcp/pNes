@@ -8,8 +8,6 @@ namespace pNes
 {
     class PulseChannel
     {
-        private const int cpuFreq = 1789773;
-        private int frequency;
 
         private byte[] regs = new byte[4];
         //$4000 / $4004 DDLC VVVV
@@ -17,6 +15,7 @@ namespace pNes
         private bool lenghtCounterHalt = false;
         private bool constantVolume = false;
         private int volume;
+        private bool lenghtEnable = false;
 
         //$4001 / $4005	EPPP NSSS
         private bool sweepEnabled = false;
@@ -33,10 +32,11 @@ namespace pNes
         //$4003 / $4007	LLLL LTTT	Length counter load (L), timer high (T)
         private int lenghtLoadCounter;
 
-        private bool channelEnabled = false;
         private bool envelopeStart = false;
         private bool reloadSweep = false;
         private bool validSweep = true;
+
+        private bool isChannel0 = false;
 
         private int timerCounter;
         private int sweepPeriodCounter;
@@ -57,16 +57,16 @@ namespace pNes
 
         public int Sample;
 
-        public PulseChannel() { }
+        public PulseChannel(bool channel) { isChannel0 = channel; }
 
         public void Tick()
         {
             if(timerCounter-- <= 0)
             {
-                timerCounter = timer;
+                timerCounter = timer + 1;
                 currentVolume = constantVolume ? volume : envelopeVolume;
                 dutyCounter &= 7;
-                if (lenghtLoadCounter != 0 && channelEnabled && validSweep)
+                if (lenghtLoadCounter > 0 && validSweep)
                 {
                     Sample = (dutyCycles[duty] >> dutyCounter++) != 0 ? currentVolume : 0;
                 }
@@ -82,13 +82,13 @@ namespace pNes
 
         public bool LenghtCounterNotZero()
         {
-            return lenghtLoadCounter != 0;
+            return lenghtLoadCounter > 0;
         }
 
-        public void EnableChannel(bool enable)
+        public void EnableChannel(bool value)
         {
-            channelEnabled = enable;
-            if (!channelEnabled) lenghtLoadCounter = 0;
+            lenghtEnable = value;
+            if(!lenghtEnable)lenghtLoadCounter = 0;
         }
 
         public void EnvelopeCounter()
@@ -108,7 +108,7 @@ namespace pNes
                     {
                         envelopeVolume--;
                     }
-                    if(lenghtCounterHalt && envelopeVolume == 0)
+                    else if(lenghtCounterHalt)
                     {
                         envelopeVolume = 0xF;
                     }
@@ -130,19 +130,28 @@ namespace pNes
             {
                 if(--sweepPeriodCounter == 0 )
                 {
-                    sweepPeriodCounter = sweepPeriod;
+                    sweepPeriodCounter = sweepPeriod + 1;
                     if(validSweep && sweepShift > 0 && sweepEnabled)
                     {
-                        int changeAmount = timer >> sweepShift;
-                        timer = negate ? timer - changeAmount : timer + changeAmount;
-                        CalculateValidSweep();
+                        if(isChannel0)
+                        {
+                            int changeAmount = timer >> sweepShift;
+                            timer += negate ? ~changeAmount : changeAmount;
+                            CalculateValidSweep();
+                        }
+                        else
+                        {
+                            int changeAmount = timer >> sweepShift;
+                            timer += negate ?  -changeAmount : changeAmount;
+                            CalculateValidSweep();
+                        }
                     }
                     
                 }
             }
             if (reloadSweep)
             {
-                sweepPeriodCounter = sweepPeriod;
+                sweepPeriodCounter = sweepPeriod + 1;
                 reloadSweep = false;
             }
         }
@@ -164,23 +173,25 @@ namespace pNes
                     negate = ((data >> 3) & 1) != 0 ? true : false;
                     sweepShift = data & 0x7;
                     reloadSweep = true;
+                    CalculateValidSweep();
                     break;
                 case 2:
                     regs[2] = data;
-                    timer &= ~0xFF;
+                    timer &= 0xFF00;
                     timer |= data;
-                    if (timer < 8) channelEnabled = false;
-                    else channelEnabled = true;    
+                    CalculateValidSweep();
                     break;
                 case 3:
                     regs[3] = data;
-                    lenghtLoadCounter = lenghtCounterLookup[(data >> 3)];
-                    timer &= ~0xFF00;
+                    if(lenghtEnable)
+                    {
+                        lenghtLoadCounter = lenghtCounterLookup[(data >> 3)] + 1;
+                    }
+                    timer &= 0xFF;
                     timer |= (data & 0x7) << 8;
-                    if (timer < 8) channelEnabled = false;
-                    else channelEnabled = true;  
                     dutyCounter = 0;
                     envelopeStart = true;
+                    CalculateValidSweep();
                     break;
             }
         }

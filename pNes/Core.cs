@@ -16,7 +16,6 @@ namespace pNes
 
         private byte pad1;
         private bool strobingPad = false;
-        private bool apuEveryOtherCycle = false;
         private int padShiftCounter = 0;
 
         private int _lastCycles;
@@ -60,10 +59,9 @@ namespace pNes
             _ppu.Tick();  
             _ppu.Tick();
             _ppu.Tick();
-            if (apuEveryOtherCycle) _apu.Tick();
+            _apu.Tick();
             if (_apu.IFlag) _cpu.InterruptRequest();
-            _cpu.NextStep();
-            apuEveryOtherCycle = !apuEveryOtherCycle;
+            _cpu.NextStep();    
         }
 
         public void NonMaskableIntterupt()
@@ -96,26 +94,17 @@ namespace pNes
             }
             else if(address < 0x4020)
             {
-                //$4000-$4017	$0018	NES APU and I/O registers
-                //$4018-$401F	$0008	APU and I/O functionality that is normally disabled.See CPU Test Mode.
-                if (address < 0x4014) return _apu.ReadApuRegister(address);
-                if(address == 0x4015) return _apu.ReadApuRegister(address);
                 if (address == 0x4016)
                 {
                     int val = 0;
                     if (strobingPad) val = pad1 & 1;
                     else
                     {
-                        val = (pad1 >> padShiftCounter++) & 1;                
+                        val = (pad1 >> padShiftCounter++) & 1;
                     }
                     return (byte)(val |= 0x40);
                 }
-                if (address == 0x4017) return _apu.ReadApuRegister(address);
-                else
-                {
-                    return 0;
-                }
-                
+                else return _apu.ReadApuRegister(address);
             
             }
             else
@@ -144,19 +133,22 @@ namespace pNes
             {
                 //$4000-$4017	$0018	NES APU and I/O registers
                 //$4018-$401F	$0008	APU and I/O functionality that is normally disabled.See CPU Test Mode.
-                if (address < 0x4014) _apu.WriteApuRegister(address, data);
-                else if (address == 0x4014)
+                if (address == 0x4014)
                 {
                     _cpu.CycleCountStep += 514; //oam transfer stall cpu for 514 cycles
                     _ppu.WritePpuRegister(address, data);
                 }
-                else if (address == 0x4015) _apu.WriteApuRegister(address, data);
                 else if (address == 0x4016)
                 {
                     strobingPad = ((data & 1) != 0) ? true : false;
                     padShiftCounter = 0;
                 }
-                else if (address == 0x4017) _apu.WriteApuRegister(address, data);
+                else
+                {
+                    _apu.WriteApuRegister(address,data);
+                }
+
+                
             }
             else
             {

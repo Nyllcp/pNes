@@ -14,6 +14,7 @@ namespace pNes
 
         private bool lenghtCounterHalt = false;
         private int linearCounter;
+        private bool lenghtEnable = false;
 
 
 
@@ -26,7 +27,6 @@ namespace pNes
         private int lenghtLoadCounter;
         private bool linearCounterReload;
 
-        private bool channelEnabled = false;
 
         private int timerCounter;
         private int linearStepCounter;
@@ -52,9 +52,9 @@ namespace pNes
         {
             if (timerCounter-- <= 0)
             {
-                timerCounter = (timer / 2);
-                if (triangleStep > triangleWave.Length - 1) triangleStep = 0;
-                if (lenghtLoadCounter != 0 && linearStepCounter != 0 && channelEnabled)
+                timerCounter = timer + 1;
+                if (triangleStep >= triangleWave.Length) triangleStep = 0;
+                if (lenghtLoadCounter > 0 && linearStepCounter > 0 && timer > 2)
                 {
                     Sample = triangleWave[triangleStep++];
                 }
@@ -66,13 +66,13 @@ namespace pNes
 
         public bool LenghtCounterNotZero()
         {
-            return lenghtLoadCounter != 0;
+            return lenghtLoadCounter > 0;
         }
 
-        public void EnableChannel(bool enable)
+        public void EnableChannel(bool value)
         {
-            channelEnabled = enable;
-            if (!channelEnabled) lenghtLoadCounter = 0;
+            lenghtEnable = value;
+            if (!lenghtEnable) lenghtLoadCounter = 0;
         }
 
         public void LenghtCounter()
@@ -107,16 +107,15 @@ namespace pNes
                     regs[2] = data;
                     timer &= ~0xFF;
                     timer |= data;
-                    if (timer < 2) channelEnabled = false;
-                    else channelEnabled = true;
                     break;
                 case 3:
                     regs[3] = data;
-                    lenghtLoadCounter = lenghtCounterLookup[(data >> 3)];
+                    if (lenghtEnable)
+                    {
+                        lenghtLoadCounter = lenghtCounterLookup[(data >> 3)];
+                    }
                     timer &= ~0xFF00;
                     timer |= (data & 0x7) << 8;
-                    if (timer < 2) channelEnabled = false;
-                    else channelEnabled = true;
                     linearCounterReload = true;
                     break;
             }

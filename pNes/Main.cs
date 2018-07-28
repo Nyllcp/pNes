@@ -47,7 +47,7 @@ namespace pNes
         private void Main_Load(object sender, EventArgs e)
         {
             _drawingSurface = new DrawingSurface();
-            _drawingSurface.Size = new System.Drawing.Size(nesWidth * 4, nesHeight * 4);
+            _drawingSurface.Size = new System.Drawing.Size(nesWidth * 3, nesHeight * 3);
             //_drawingSurface.ContextMenuStrip = rightClickMenu;
             this.ClientSize = new Size(_drawingSurface.Right, _drawingSurface.Bottom + menuStrip.Height + statusStrip.Height);
             Controls.Add(_drawingSurface);
@@ -69,7 +69,7 @@ namespace pNes
             _texture = new Texture(nesWidth, nesHeight);
             _texture.Smooth = false;
             _sprite = new Sprite(_texture);
-            _sprite.Scale = new Vector2f(4f, 4f);
+            _sprite.Scale = new Vector2f(3f, 3f);
             _window = new RenderWindow(_drawingSurface.Handle);
             _window.SetFramerateLimit(0);
             _texture.Update(_frame);
