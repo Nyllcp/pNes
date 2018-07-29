@@ -85,11 +85,14 @@ namespace pNes
         public void LinearCounter()
         {
             if (linearCounterReload) linearStepCounter = linearCounter;
-            if(linearStepCounter > 0)
+            else if (linearStepCounter > 0)
             {
                 linearStepCounter--;
+                
             }
             if (!lenghtCounterHalt) linearCounterReload = false;
+
+
         }
       
         public void WriteReg(int address, byte data)
@@ -100,6 +103,7 @@ namespace pNes
                     regs[0] = data;
                     lenghtCounterHalt = ((data >> 5) & 7) != 0 ? true : false;
                     linearCounter = data & 0x7F;
+                    linearStepCounter = linearCounter;
                     break;
                 case 1:
                     break;

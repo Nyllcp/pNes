@@ -71,7 +71,7 @@ namespace pNes
                     sampleBuffer >>= 1;
                 }
                 sampleShiftCounter--;
-                if(sampleShiftCounter >= 0)
+                if(sampleShiftCounter <= 0)
                 {
                     sampleShiftCounter = 8;
                     if (sampleLenghtCounter >= 0)
@@ -81,7 +81,7 @@ namespace pNes
                         if (fetchAdress >= 0xFFFF) fetchAdress = 0x8000;
                         else fetchAdress++;
                         sampleLenghtCounter--;
-                        if(sampleLenghtCounter == 0)
+                        if(sampleLenghtCounter <= 0)
                         {
                             if(loopFlag)
                             {
@@ -109,7 +109,7 @@ namespace pNes
                 fetchAdress = sampleAdress;
                 sampleLenghtCounter = sampleLenght;
             }
-            else
+            else if(!enable)
             {
                 sampleLenghtCounter = 0;
                 sampleLenght = 0;
