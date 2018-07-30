@@ -27,7 +27,7 @@ namespace pNes
         private bool envelopeStart = false;
 
 
-        private int shiftRegister = 0x7FF;
+        private int shiftRegister = 1;
         
         private int timerCounter;
         private int envelopeCounter;
@@ -42,7 +42,7 @@ namespace pNes
         };
         private int[] timerPeriod = new int[]
         {
-            4, 8, 14, 30, 60, 88, 118, 148, 188, 236, 354, 472, 708,  944, 1890, 3778
+            4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068
         };
 
         public bool LenghtCounterNotZero()
@@ -58,14 +58,14 @@ namespace pNes
         {
             if (timerCounter-- <= 0)
             {
-                timerCounter = timerPeriod[period] + 1;
+                timerCounter = timerPeriod[period];
                 currentVolume = constantVolume ? volume : envelopeVolume;
-                int shiftBit = mode1 ? (shiftRegister & 1) ^ ((shiftRegister >> 5) & 1) : (shiftRegister & 1) ^ ((shiftRegister >> 1) & 1);
+                int shiftBit = mode1 ? (shiftRegister & 1) ^ ((shiftRegister >> 6) & 1) : (shiftRegister & 1) ^ ((shiftRegister >> 1) & 1);
                 shiftRegister >>= 1;
                 shiftRegister |= shiftBit << 14;
                 if(lenghtLoadCounter > 0)
                 {
-                    Sample = (shiftRegister & 1) != 0 ? currentVolume : 0;
+                    Sample = (shiftRegister & 1) == 0 ? currentVolume : 0;
                 }
                 else Sample = 0;
             }
@@ -82,14 +82,18 @@ namespace pNes
             if (envelopeStart)
             {
                 envelopeStart = false;
-                envelopeCounter = volume;
+                envelopeCounter = volume + 1;
                 envelopeVolume = 0xF;
             }
-            else if (envelopeCounter > 0)
+            else 
             {
-                if (--envelopeCounter == 0)
+                if(envelopeCounter > 0)
                 {
-                    envelopeCounter = volume;
+                    envelopeCounter--;
+                }
+                else
+                {
+                    envelopeCounter = volume + 1;
                     if (envelopeVolume > 0)
                     {
                         envelopeVolume--;
@@ -130,7 +134,7 @@ namespace pNes
                     regs[3] = data;
                     if(lenghtEnable)
                     {
-                        lenghtLoadCounter = lenghtCounterLookup[(data >> 3)];
+                        lenghtLoadCounter = lenghtCounterLookup[(data >> 3)] + 1;
                     }
                     envelopeStart = true;
                     break;

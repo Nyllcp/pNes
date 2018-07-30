@@ -38,6 +38,8 @@ namespace pNes
         private byte[] _frame = new byte[nesWidth * nesHeight * 4]; //4 Bytes per pixel
 
         private bool run = false;
+        private bool frameLimit = true;
+        private bool frameLimitToggle = false;
 
         public Main()
         {
@@ -88,11 +90,15 @@ namespace pNes
                 Input();
                 _nes.RunOneFrame();
                 _audio.AddSample(_nes.Samples, _nes.NoOfSamples, true);
-                while (_audio.GetBufferedBytes() > (((44100) / 60 * 2) * 4))
+                if(frameLimit)
                 {
-                    System.Threading.Thread.Sleep(1);
-                    //Max 4 frames of audio lag, cant go lower probably cause of thread sleep beeing useless.
+                    while (_audio.GetBufferedBytes() > (((44100) / 60 * 2) * 4))
+                    {
+                        System.Threading.Thread.Sleep(1);
+                        //Max 4 frames of audio lag, cant go lower probably cause of thread sleep beeing useless.
+                    }
                 }
+               
                 UpdateFrameRGB(_nes.Frame);
                 _texture.Update(_frame);
                 _window.Clear();
@@ -171,11 +177,6 @@ namespace pNes
             Application.Exit();
         }
 
-        private void Main_FormClosed(object sender, FormClosedEventArgs e)
-        {
-            run = false;
-            Application.Exit();
-        }
         private void Input()
         {
             keyDataLast = keyData;
@@ -217,11 +218,11 @@ namespace pNes
                 _nes.Pad1 = (byte)keyData;
             }
 
-            //if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.Q) || SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.C) && !frameLimitToggle)
-            //{
-            //    frameLimit = !frameLimit;
-            //}
-            //frameLimitToggle = SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.Q) | SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.C);
+            if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.Q) || SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.C) && !frameLimitToggle)
+            {
+                frameLimit = !frameLimit;
+            }
+            frameLimitToggle = SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.Q) | SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.C);
 
             //if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.E) && !saveStateToggle)
             //{
@@ -233,6 +234,12 @@ namespace pNes
             //}
             //saveStateToggle = SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.R) | SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.E);
 
+        }
+
+        private void Main_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            run = false;
+            Application.Exit();
         }
     }
 }

@@ -16,11 +16,12 @@ namespace pNes
         private byte[] prgRom;
         private byte[] chrRom;
         private byte[] prgRam;
-        private byte[,] ppuRam = new byte[4,0x400];
+        private byte[,] ppuRam = new byte[4, ppuRamBankSize];
+        private Mapper1 _mapper1;
 
         private const int prgRomBankSize16k = 0x4000;
         private const int chrRomBankSize8k = 0x2000;
-        private const int prgRomBankSize18k = 0x2000;
+        private const int prgRomBankSize8k = 0x2000;
         private const int chrRomBankSize4k = 0x1000;
         private const int prgRamBankSize = 0x2000;
         private const int ppuRamBankSize = 0x400;
@@ -118,6 +119,10 @@ namespace pNes
                     if (chrRamEnabled) break;
                     chrRom[i] = _reader.ReadByte();
                 }
+                if(mapperNumber == 1)
+                {
+                    _mapper1 = new Mapper1(prgRom, chrRom);
+                }
 
 
                 success = true;
@@ -132,9 +137,17 @@ namespace pNes
         }
         public byte ReadCart(int address)
         {
+            if(mapperNumber == 1)
+            {
+                return _mapper1.ReadCart(address);
+            }
             if(mapperNumber == 2)
             {
-                if(address < 0xC000)
+                if (address < 0x4000)
+                {
+                    return PpuRead(address);
+                }
+                if (address < 0xC000)
                 {
                     return prgRom[(prgRomBankSize16k * selectedBank) + (address & (prgRomBankSize16k - 1))];
                 }
@@ -143,22 +156,45 @@ namespace pNes
                     return prgRom[(prgRom.Length - prgRomBankSize16k) + (address & (prgRomBankSize16k - 1))];
                 }
             }
-            return prgRom[address & (prgRom.Length -1)];
+            if(address < 0x4000)
+            {
+                return PpuRead(address);
+            }
+            else
+            {
+                return prgRom[address & (prgRom.Length - 1)];
+            }
+           
         }
         public void WriteCart(int address, byte data)
         {
-            
             //cart writes, todo
-            if(mapperNumber == 2)
+            if(mapperNumber == 1)
             {
-                if(address > 0x7FFF)
+                _mapper1.WriteCart(address, data);
+            }
+            if (mapperNumber == 2)
+            {
+                if (address > 0x7FFF)
                 {
                     selectedBank = data & 0xF;
                 }
             }
+
+            if (address < 0x4000)
+            {
+                PpuWrite(address, data);
+            }
+
+            
         }
 
-        public byte PpuRead(int address)
+        public void Tick()
+        {
+            if (_mapper1 != null) _mapper1.Tick();
+        }
+
+        private byte PpuRead(int address)
         {
             if (address < 0x2000)
             {
@@ -190,7 +226,7 @@ namespace pNes
             return 0;
         }
 
-        public void PpuWrite(int address, byte data)
+        private void PpuWrite(int address, byte data)
         {
             if (address < 0x2000)
             {

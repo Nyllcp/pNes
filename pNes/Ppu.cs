@@ -199,15 +199,15 @@ namespace pNes
                         tileNumber &= 0xFE;
                         tileAddress |= (tileNumber * 0x10) + row;
                         
-                        tileData0 = _cart.PpuRead(tileAddress);
-                        tileData1 = _cart.PpuRead(tileAddress + 8);
+                        tileData0 = _cart.ReadCart(tileAddress);
+                        tileData1 = _cart.ReadCart(tileAddress + 8);
                     }
                     else
                     {
                         int row = flipY ? 7 - (currentScanline - (ypos + 1)) : currentScanline - (ypos + 1);
                         int tileAddress = ((tileNumber * 0x10) + row) | spriteTableAdress;
-                        tileData0 = _cart.PpuRead(tileAddress);
-                        tileData1 = _cart.PpuRead(tileAddress + 8);
+                        tileData0 = _cart.ReadCart(tileAddress);
+                        tileData1 = _cart.ReadCart(tileAddress + 8);
                     }
                     
                     int bit0 = 0;
@@ -226,6 +226,7 @@ namespace pNes
                         }
                         int pixel = 0x10 | (palette << 2) | (bit1 << 1) | bit0;
                         if(xpos + j > (scanlinebuffer.Length - 1)) { break; }
+                        if (!showLeftSprite && (xpos + j) < 8) continue;
                         if((pixel & 0x3) == 0) { continue; }
                         if (behindBg && (scanlinebuffer[xpos + j] & 3) != 0) { continue; }
                         scanlinebuffer[xpos + j] = (byte)pixel;
@@ -287,8 +288,8 @@ namespace pNes
                         int row = flipY ? 7 - (currentScanline - (ypos + 1)) : currentScanline - (ypos + 1);
                         int tileAddress = ((secondaryOam[1] * 0x10) + row) | spriteTableAdress;
 
-                        byte tileData0 = _cart.PpuRead(tileAddress);
-                        byte tileData1 = _cart.PpuRead(tileAddress + 8);
+                        byte tileData0 = _cart.ReadCart(tileAddress);
+                        byte tileData1 = _cart.ReadCart(tileAddress + 8);
                         int bit0 = 0;
                         int bit1 = 0;
                         for (int j = 0; j < 8; j++)
@@ -366,7 +367,11 @@ namespace pNes
                 
 
 
-                if ((pixel & 3) == 0) pixel = 0;
+                //if ((pixel & 3) == 0) pixel = 0;
+                if(!showLeftBg && currentDot < 8)
+                {
+                    pixel = 0;
+                }
                 scanlinebuffer[currentDot] = pixel;
             }
             if (currentDot < 256 && currentScanline <= 239 && !bgEnabled)
@@ -382,7 +387,10 @@ namespace pNes
             int attributeAddress = 0x23C0 | (ppuAddress & 0x0C00) | ((ppuAddress >> 4) & 0x38) | ((ppuAddress >> 2) & 0x07); 
             int row = (ppuAddress >> 12) & 0x7;
             tilePointer = ((ReadPpuMemory(tileAddress) * 0x10) + row) | backgroundTableAdress;
+            if(tilePointer > 0x1020)
+            {
 
+            }
             tileAttribute = bufferTileAttribute;
             tileData0 = (tileData0 & 0xFF) << 8;
             tileData1 = (tileData1 & 0xFF) << 8;
@@ -516,12 +524,12 @@ namespace pNes
         {
             if(address < 0x2000)
             {
-                _cart.PpuWrite(address, data);
+                _cart.WriteCart(address, data);
             }
             else if(address < 0x3F00)
             {
                 //vram[address & 0x7FF] = data;
-                _cart.PpuWrite(address, data);
+                _cart.WriteCart(address, data);
             }
             else
             {
@@ -538,12 +546,12 @@ namespace pNes
 
             if (address < 0x2000)
             {
-                return _cart.PpuRead(address);
+                return _cart.ReadCart(address);
             }
             else if (address < 0x3F00)
             {
                 //return vram[address & 0x7FF];
-                return _cart.PpuRead(address);
+                return _cart.ReadCart(address);
             }
             else
             {

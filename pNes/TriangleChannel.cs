@@ -116,7 +116,7 @@ namespace pNes
                     regs[3] = data;
                     if (lenghtEnable)
                     {
-                        lenghtLoadCounter = lenghtCounterLookup[(data >> 3)];
+                        lenghtLoadCounter = lenghtCounterLookup[(data >> 3)] + 1;
                     }
                     timer &= ~0xFF00;
                     timer |= (data & 0x7) << 8;

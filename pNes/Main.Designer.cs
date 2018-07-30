@@ -97,6 +97,7 @@
             this.MainMenuStrip = this.menuStrip;
             this.Name = "Main";
             this.Text = "pNes";
+            this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.Main_FormClosing);
             this.Load += new System.EventHandler(this.Main_Load);
             this.menuStrip.ResumeLayout(false);
             this.menuStrip.PerformLayout();

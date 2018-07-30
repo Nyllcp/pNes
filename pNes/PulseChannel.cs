@@ -93,22 +93,26 @@ namespace pNes
 
         public void EnvelopeCounter()
         {
-            if(envelopeStart)
+            if (envelopeStart)
             {
                 envelopeStart = false;
-                envelopeCounter = volume;
+                envelopeCounter = volume + 1;
                 envelopeVolume = 0xF;
             }
-            else if(envelopeCounter > 0)
+            else
             {
-                if(--envelopeCounter == 0)
+                if (envelopeCounter > 0)
                 {
-                    envelopeCounter = volume;
-                    if(envelopeVolume > 0)
+                    envelopeCounter--;
+                }
+                else
+                {
+                    envelopeCounter = volume + 1;
+                    if (envelopeVolume > 0)
                     {
                         envelopeVolume--;
                     }
-                    else if(lenghtCounterHalt)
+                    else if (lenghtCounterHalt)
                     {
                         envelopeVolume = 0xF;
                     }

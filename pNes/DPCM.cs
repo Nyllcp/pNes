@@ -50,7 +50,7 @@ namespace pNes
         {
             if(timerCounter-- <= 0)
             {
-                timerCounter = timerPeriodLookup[rate] + 1;
+                timerCounter = timerPeriodLookup[rate];
 
                 if (bufferAvailable)
                 {
@@ -74,7 +74,7 @@ namespace pNes
                 if(sampleShiftCounter <= 0)
                 {
                     sampleShiftCounter = 8;
-                    if (sampleLenghtCounter >= 0)
+                    if (sampleLenghtCounter > 0)
                     {
                         bufferAvailable = true;
                         sampleBuffer = _core.ReadMemory(fetchAdress);
@@ -112,7 +112,6 @@ namespace pNes
             else if(!enable)
             {
                 sampleLenghtCounter = 0;
-                sampleLenght = 0;
             }
             iFlag = false;
         }
@@ -135,7 +134,6 @@ namespace pNes
                     break;
                 case 3:
                     sampleLenght = (data << 4) | 1;
-                    sampleLenghtCounter = sampleLenght;
                     break;
             }
         }
