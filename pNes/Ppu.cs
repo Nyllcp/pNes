@@ -8,7 +8,7 @@ namespace pNes
 {
     class Ppu
     {
-        private Cart _cart;
+        private Cartridge _cart;
         private Core _core;
 
         private uint[] PalleteRGBlookup = new uint[0x40]{
@@ -71,7 +71,7 @@ namespace pNes
 
         public uint[] Frame { get { return _frame; } }
 
-        public Ppu(Cart cart, Core core)
+        public Ppu(Cartridge cart, Core core)
         {
             _cart = cart;
             _core = core;
@@ -284,33 +284,50 @@ namespace pNes
                         int ypos = secondaryOam[0];
                         bool flipX = ((secondaryOam[2] >> 6) & 0x1) != 0;
                         bool flipY = ((secondaryOam[2] >> 7) & 0x1) != 0;
-                        
-                        int row = flipY ? 7 - (currentScanline - (ypos + 1)) : currentScanline - (ypos + 1);
-                        int tileAddress = ((secondaryOam[1] * 0x10) + row) | spriteTableAdress;
 
-                        byte tileData0 = _cart.ReadCart(tileAddress);
-                        byte tileData1 = _cart.ReadCart(tileAddress + 8);
+                        byte spriteData0;
+                        byte spriteData1;
+                        int tileNumber = secondaryOam[1];
+                        if (largeSprites)
+                        {
+                            int row = flipY ? 15 - (currentScanline - (ypos + 1)) : currentScanline - (ypos + 1);
+                            int tileAddress = (tileNumber & 1) != 0 ? 0x1000 : 0x0;
+                            if (row > 7)
+                            {
+                                row += 8;
+                            }
+                            tileNumber &= 0xFE;
+                            tileAddress |= (tileNumber * 0x10) + row;
+
+                            spriteData0 = _cart.ReadCart(tileAddress);
+                            spriteData1 = _cart.ReadCart(tileAddress + 8);
+                        }
+                        else
+                        {
+                            int row = flipY ? 7 - (currentScanline - (ypos + 1)) : currentScanline - (ypos + 1);
+                            int tileAddress = ((tileNumber * 0x10) + row) | spriteTableAdress;
+                            spriteData0 = _cart.ReadCart(tileAddress);
+                            spriteData1 = _cart.ReadCart(tileAddress + 8);
+                        }
+
                         int bit0 = 0;
                         int bit1 = 0;
-                        for (int j = 0; j < 8; j++)
+                        if (flipX)
                         {
-                            if (flipX)
-                            {
-                                bit0 = (tileData0 >> j) & 0x1;
-                                bit1 = (tileData1 >> j) & 0x1;
-                            }
-                            else
-                            {
-                                bit0 = (tileData0 >> 7 - j) & 0x1;
-                                bit1 = (tileData1 >> 7 - j) & 0x1;
-                            }
-                            int sprite0pixel = (bit1 << 1) | bit0;
+                            bit0 = (spriteData0 >> (currentDot - xpos)) & 0x1;
+                            bit1 = (spriteData1 >> (currentDot - xpos)) & 0x1;
+                        }
+                        else
+                        {
+                            bit0 = (spriteData0 >> 7 - (currentDot - xpos)) & 0x1;
+                            bit1 = (spriteData1 >> 7 - (currentDot - xpos)) & 0x1;
+                        }
+                        int sprite0pixel = (bit1 << 1) | bit0;
 
-                            if ((pixel & 3) != 0 && sprite0pixel != 0)
-                            {
-                                sprite0Hit = true;
-                                sprite0evaluated = false;
-                            }
+                        if ((pixel & 3) != 0 && sprite0pixel != 0)
+                        {
+                            sprite0Hit = true;
+                            sprite0evaluated = false;
                         }
                     }
                 }
@@ -367,7 +384,7 @@ namespace pNes
                 
 
 
-                //if ((pixel & 3) == 0) pixel = 0;
+                if ((pixel & 3) == 0) pixel = 0;
                 if(!showLeftBg && currentDot < 8)
                 {
                     pixel = 0;
@@ -537,7 +554,7 @@ namespace pNes
                 {
                     address &= ~0x10;
                 }
-                paletteRam[address & 0x1F] = data;
+                paletteRam[address & 0x1F] = (byte)(data & 0x3F);
             }
         }
 

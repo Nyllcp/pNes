@@ -24,6 +24,7 @@ namespace pNes
         private Audio _audio;
         private OpenFileDialog _ofd;
         private Core _nes;
+        private Rom _rom;
 
 
         const int nesWidth = 256;
@@ -155,16 +156,23 @@ namespace pNes
             {
                 run = false;
                 _nes = new Core();
-                if (_nes.LoadRom(_ofd.FileName))
+                _rom = new Rom();
+                if(!_rom.Load(_ofd.FileName))
                 {
-
-                    this.Text = "pNes - " + System.IO.Path.GetFileName(_ofd.FileName);
+                    toolStripStatusRomName.Text = "Invalid file";
+                    return;
+                }
+                if (_nes.LoadRom(_rom))
+                {
+                    string fileName = System.IO.Path.GetFileNameWithoutExtension(_ofd.FileName);
+                    fileName += " Mapper " + _rom.mapperNumber.ToString();
+                    toolStripStatusRomName.Text = fileName;
                     _clock.Restart().AsMilliseconds();
                     RunEmulation();
                 }
                 else
                 {
-                    this.Text = "pGameBoy - " + "Invalid ROM / File";
+                    toolStripStatusRomName.Text = "Mapper " + _rom.mapperNumber.ToString() + " not implemented :<";
                 }
             }
         }
@@ -241,5 +249,6 @@ namespace pNes
             run = false;
             Application.Exit();
         }
+
     }
 }

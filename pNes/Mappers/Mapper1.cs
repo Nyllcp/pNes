@@ -6,21 +6,8 @@ using System.Threading.Tasks;
 
 namespace pNes
 {
-    class Mapper1
+    class Mapper1 : Mapper
     {
-        private byte[] prgRom;
-        private byte[] chrRom;
-        private byte[] prgRam = new byte[prgRamBankSize];
-        private byte[] sRam = new byte[chrRomBankSize8k];
-        private byte[,] ppuRam = new byte[4, ppuRamBankSize];
-
-        private const int prgRomBankSize32k = 0x8000;
-        private const int prgRomBankSize16k = 0x4000;
-        private const int chrRomBankSize8k = 0x2000;
-        private const int prgRomBankSize8k = 0x2000;
-        private const int chrRomBankSize4k = 0x1000;
-        private const int prgRamBankSize = 0x2000;
-        private const int ppuRamBankSize = 0x400;
 
         //Load register ($8000-$FFFF)
         private byte loadRegister;
@@ -28,7 +15,7 @@ namespace pNes
         //Control (internal, $8000-$9FFF)
         private enum Mirroring
         { OneScreenLower, OneScreenUpper, Vertical, Horizontal };
-        private byte currentMirroring;
+        private int currentMirroring;
         private byte prgRomBankMode = 3; // cart set ctrl reg to 0x0C at startup, resulting in bankmode 3.
         private byte chrRomBankMode = 0;
         //CHR bank 0 (internal, $A000-$BFFF)
@@ -42,17 +29,7 @@ namespace pNes
 
         private int cyclesBetweenWrites;
 
-
-
-        public Mapper1(byte[] prgrom, byte[] chrrom)
-        {
-            prgRom = new byte[prgrom.Length];
-            chrRom = new byte[chrrom.Length];
-            Array.Copy(prgrom, prgRom, prgRom.Length);
-            Array.Copy(chrrom, chrRom, chrRom.Length);
-        }
-
-        public void Tick()
+        public override void Tick()
         {
             if (cyclesBetweenWrites > 0) cyclesBetweenWrites--;
         }
@@ -74,7 +51,7 @@ namespace pNes
             switch((address >> 13) & 3)
             {
                 case 0:
-                    currentMirroring = (byte)(loadRegister & 0x3);
+                    currentMirroring = loadRegister & 0x3;
                     prgRomBankMode = (byte)((loadRegister >> 2) & 0x3);
                     chrRomBankMode = (byte)((loadRegister >> 4) & 0x1);
                     break;
@@ -113,11 +90,14 @@ namespace pNes
 
         }
 
-        public void WriteCart(int address, byte data)
+        public override void WriteCart(int address, byte data)
         {
             if(address < 0x2000)
             {
-                chrRom[address & (chrRom.Length - 1)] = data;
+                if (_rom.chrRamEnabled)
+                {
+                    _rom.chrRom[address & (_rom.chrRom.Length - 1)] = data;
+                }
             }
             else if (address < 0x3F00)
             {
@@ -132,7 +112,7 @@ namespace pNes
                 WriteReg(address, data);
             }
         }
-        public byte ReadCart(int address)
+        public override byte ReadCart(int address)
         {
             if(address < 0x2000) //ChrRom
             {
@@ -153,7 +133,7 @@ namespace pNes
 
         }
 
-        private byte ReadPRG(int address)
+        protected override byte ReadPRG(int address)
         {
             //PRG ROM bank mode (0, 1: switch 32 KB at $8000, ignoring low bit of bank number;
             //                    | 2: fix first bank at $8000 and switch 16 KB bank at $C000;
@@ -161,24 +141,24 @@ namespace pNes
             switch (prgRomBankMode)
             {
                 case 0:
-                case 1: return prgRom[(prgRomBankSize32k * prgBank) + (address & (prgRomBankSize32k - 1))];
+                case 1: return _rom.prgRom[(prgRomBankSize32k * prgBank) + (address & (prgRomBankSize32k - 1))];
                 case 2:
                     if (address < 0xC000)
                     {
-                        return prgRom[address & (prgRomBankSize16k - 1)];
+                        return _rom.prgRom[address & (prgRomBankSize16k - 1)];
                     }
                     else
                     {
-                        return prgRom[(prgRomBankSize16k * prgBank) + (address & (prgRomBankSize16k - 1))];
+                        return _rom.prgRom[(prgRomBankSize16k * prgBank) + (address & (prgRomBankSize16k - 1))];
                     }
                 case 3:
                     if (address < 0xC000)
                     {
-                        return prgRom[(prgRomBankSize16k * prgBank) + (address & (prgRomBankSize16k - 1))];
+                        return _rom.prgRom[(prgRomBankSize16k * prgBank) + (address & (prgRomBankSize16k - 1))];
                     }
                     else
                     {
-                        return prgRom[(prgRom.Length - prgRomBankSize16k) + (address & (prgRomBankSize16k - 1))];
+                        return _rom.prgRom[(_rom.prgRom.Length - prgRomBankSize16k) + (address & (prgRomBankSize16k - 1))];
                     }
                 default:return 0;
 
@@ -186,27 +166,27 @@ namespace pNes
             }
         }
 
-        private byte ReadCHR(int address)
+        protected override byte ReadCHR(int address)
         {
             // CHR ROM bank mode (0: switch 8 KB at a time; 1: switch two separate 4 KB banks)
             if(chrRomBankMode != 0)
             {
                 if(address < 0x1000)
                 {
-                    return chrRom[(chrBank0 * chrRomBankSize4k) + (address & (chrRomBankSize4k - 1))];
+                    return _rom.chrRom[(chrBank0 * chrRomBankSize4k) + (address & (chrRomBankSize4k - 1))];
                 }
                 else
                 {
-                    return chrRom[(chrBank1 * chrRomBankSize4k) + (address & (chrRomBankSize4k - 1))];
+                    return _rom.chrRom[(chrBank1 * chrRomBankSize4k) + (address & (chrRomBankSize4k - 1))];
                 }
             }
             else
             {
-                return chrRom[(chrBank0 * chrRomBankSize8k) + (address & (chrRomBankSize8k - 1))];
+                return _rom.chrRom[(chrBank0 * chrRomBankSize8k) + (address & (chrRomBankSize8k - 1))];
             }
         }
 
-        private byte ReadVram(int address)
+        protected override byte ReadVram(int address)
         {
             switch(currentMirroring)
             {
@@ -251,7 +231,7 @@ namespace pNes
           
         }
 
-        private void WriteVram(int address, byte data)
+        protected override void WriteVram(int address, byte data)
         {
             switch (currentMirroring)
             {

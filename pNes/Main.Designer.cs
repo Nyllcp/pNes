@@ -33,7 +33,9 @@
             this.openToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.exitToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
+            this.toolStripStatusRomName = new System.Windows.Forms.ToolStripStatusLabel();
             this.toolStripStatusFps = new System.Windows.Forms.ToolStripStatusLabel();
+            this.toolStripStatusLabel1 = new System.Windows.Forms.ToolStripStatusLabel();
             this.menuStrip.SuspendLayout();
             this.statusStrip.SuspendLayout();
             this.SuspendLayout();
@@ -74,6 +76,8 @@
             // statusStrip
             // 
             this.statusStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.toolStripStatusRomName,
+            this.toolStripStatusLabel1,
             this.toolStripStatusFps});
             this.statusStrip.Location = new System.Drawing.Point(0, 239);
             this.statusStrip.Name = "statusStrip";
@@ -81,11 +85,24 @@
             this.statusStrip.TabIndex = 1;
             this.statusStrip.Text = "statusStrip";
             // 
+            // toolStripStatusRomName
+            // 
+            this.toolStripStatusRomName.Name = "toolStripStatusRomName";
+            this.toolStripStatusRomName.Size = new System.Drawing.Size(93, 17);
+            this.toolStripStatusRomName.Text = "No Rom Loaded";
+            // 
             // toolStripStatusFps
             // 
             this.toolStripStatusFps.Name = "toolStripStatusFps";
-            this.toolStripStatusFps.Size = new System.Drawing.Size(102, 17);
-            this.toolStripStatusFps.Text = "toolStripStatusFps";
+            this.toolStripStatusFps.RightToLeft = System.Windows.Forms.RightToLeft.No;
+            this.toolStripStatusFps.Size = new System.Drawing.Size(32, 17);
+            this.toolStripStatusFps.Text = "FPS: ";
+            // 
+            // toolStripStatusLabel1
+            // 
+            this.toolStripStatusLabel1.Name = "toolStripStatusLabel1";
+            this.toolStripStatusLabel1.Size = new System.Drawing.Size(113, 17);
+            this.toolStripStatusLabel1.Spring = true;
             // 
             // Main
             // 
@@ -116,6 +133,8 @@
         private System.Windows.Forms.ToolStripMenuItem openToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem exitToolStripMenuItem;
         private System.Windows.Forms.ToolStripStatusLabel toolStripStatusFps;
+        private System.Windows.Forms.ToolStripStatusLabel toolStripStatusRomName;
+        private System.Windows.Forms.ToolStripStatusLabel toolStripStatusLabel1;
     }
 }
 

@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace pNes
 {
-    class Mapper2
+    class Mapper0 : Mapper
     {
     }
 }

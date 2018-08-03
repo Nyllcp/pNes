@@ -8,7 +8,7 @@ namespace pNes
 {
     class Core
     {
-        private Cart _cart;
+        private Cartridge _cart;
         //private Cpu _cpu;
         private Processor _cpu;
         private Ppu _ppu;
@@ -31,15 +31,15 @@ namespace pNes
 
         public Core()
         {
-            _cart = new Cart();
+            _cart = new Cartridge();
             _cpu = new Processor(this);
             _ppu = new Ppu(_cart,this);
             _apu = new Apu(this);
         }
 
-        public bool LoadRom(string fileName)
+        public bool LoadRom(Rom rom)
         {
-            bool value = _cart.LoadRom(fileName);
+            bool value = _cart.LoadRom(rom);
             if (value) _cpu.Reset();
             return value;
         }
