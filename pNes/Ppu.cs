@@ -109,6 +109,7 @@ namespace pNes
                 inVblank = false;
                 sprite0Hit = false;
                 frameReady = false;
+                spriteOverflow = false;
                 if (bgEnabled || spritesEnabled)
                 {
                     oddFrame = !oddFrame;
@@ -120,7 +121,9 @@ namespace pNes
             {
                 if (bgEnabled || spritesEnabled)
                 {
-                    ppuAddress = tempPpuAddress;
+                    //ppuAddress = tempPpuAddress;
+                    ppuAddress &= ~0x7BE0;
+                    ppuAddress |= tempPpuAddress & 0x7BE0;
                     if (oddFrame && currentDot == 304)
                         ppuCycles++;
                 }
@@ -172,6 +175,10 @@ namespace pNes
                                 sOam[numberOfSprites].SpriteData[j] = oam[i + j];
                             }
                         }
+                        else
+                        {
+                            spriteOverflow = true;
+                        }
                         numberOfSprites++;
                     }
                 }
@@ -213,14 +220,14 @@ namespace pNes
                     }
                     if (currentDot == 256)
                     {
-                        IncrementY();
+                        IncrementY();   
                     }
                     if (currentDot == 257)
                     {
-                        ppuAddress &= ~0x1F;
-                        ppuAddress &= ~0x400;
-                        ppuAddress |= tempPpuAddress & 0x1F;
-                        ppuAddress |= tempPpuAddress & 0x400;
+                        //ppuAddress &= ~0x1F;
+                        ppuAddress &= ~0x41F;
+                        //ppuAddress |= tempPpuAddress & 0x1F;
+                        ppuAddress |= tempPpuAddress & 0x41F;
                         oamAddr = 0;
                     }
                     if((currentDot % 8) == 0 && currentDot >= 264 && currentDot <= 320)

@@ -33,7 +33,7 @@ namespace pNes
 
 
         private bool mode0 = true;
-        private bool disableInterrupt = false;
+        private bool disableInterrupt = true;
 
         public bool IFlag { get { bool value = iFlag || _dpcm.iFlag; iFlag = false; return value; } }
 

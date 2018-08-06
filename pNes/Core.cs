@@ -62,9 +62,11 @@ namespace pNes
             _ppu.Tick();
             _ppu.Tick();
             _apu.Tick();
-            if (_apu.IFlag) _cpu.InterruptRequest();
+            if (_apu.IFlag)
+           { _cpu.InterruptRequest(); }
             _cart.Tick();
-            if(_cart.Iflag) _cpu.InterruptRequest();
+            if (_cart.Iflag)
+            { _cpu.InterruptRequest(); }
             _cpu.NextStep();    
         }
 

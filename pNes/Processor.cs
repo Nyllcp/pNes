@@ -259,7 +259,6 @@ namespace pNes
             CurrentOpCode = ReadMemoryValue(ProgramCounter);
 
             ProgramCounter++;
-
             ExecuteOpCode();
 
             if (_previousInterrupt)
