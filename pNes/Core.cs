@@ -14,6 +14,8 @@ namespace pNes
         private Ppu _ppu;
         private Apu _apu;
 
+        private const int cpuFreq = 1789773;
+
         private byte pad1;
         private bool strobingPad = false;
         private int padShiftCounter = 0;
@@ -62,6 +64,7 @@ namespace pNes
             _apu.Tick();
             if (_apu.IFlag) _cpu.InterruptRequest();
             _cart.Tick();
+            if(_cart.Iflag) _cpu.InterruptRequest();
             _cpu.NextStep();    
         }
 
@@ -133,6 +136,7 @@ namespace pNes
                 if (address == 0x4014)
                 {
                     _cpu.CycleCountStep += 514; //oam transfer stall cpu for 514 cycles
+                    _cpu.SetCycleCount(_cpu.GetCycleCount() + 514);
                     _ppu.WritePpuRegister(address, data);
                 }
                 else if (address == 0x4016)

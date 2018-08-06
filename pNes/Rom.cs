@@ -84,7 +84,7 @@ namespace pNes
             prgRomCount = header[4] == 0 ? 1 : header[4];
             chrRomCount = header[5];
             chrRamEnabled = chrRomCount == 0 ? true : false;
-
+            
             verticalMirroring = (header[6] & 1) != 0;
             batteryRam = ((header[6] >> 1) & 1) != 0;
             trainer = ((header[6] >> 2) & 1) != 0;
@@ -102,6 +102,10 @@ namespace pNes
             if(!chrRamEnabled)
             {
                 reader.Read(chrRom, 0, chrRom.Length);
+            }
+            else
+            {
+                chrRomCount = 1;
             }
 
             reader.Close();

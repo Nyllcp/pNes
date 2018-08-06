@@ -10,6 +10,7 @@ namespace pNes
     {
 
         private Mapper _mapper;
+        public bool Iflag { get { return _mapper.Iflag; } }
 
         public Cartridge() { }
 
@@ -20,6 +21,8 @@ namespace pNes
                 case 0: _mapper = new Mapper0(); _mapper.Init(rom); break;
                 case 1: _mapper = new Mapper1(); _mapper.Init(rom); break;
                 case 2: _mapper = new Mapper2(); _mapper.Init(rom); break;
+                case 3: _mapper = new Mapper3(); _mapper.Init(rom); break;
+                case 4: _mapper = new Mapper4(); _mapper.Init(rom); break;
             }
 
             return _mapper != null;

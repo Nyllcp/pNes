@@ -56,17 +56,15 @@ namespace pNes
                     chrRomBankMode = (byte)((loadRegister >> 4) & 0x1);
                     break;
                 case 1:
-                    chrBank0 = loadRegister;
-                    if(chrRomBankMode == 0)
+                    chrBank0 = (byte)(loadRegister % chr4kBankCount);
+                    if (chrRomBankMode == 0)
                     {
-                        chrBank0 >>= 1;
-                        chrBank0 &= 0x7;
                         if (((loadRegister >> 4) & 1) == 0) { prgRamEnabled = true; }
                         else prgRamEnabled = false;
                     }
                     break;
                 case 2:
-                    chrBank1 = loadRegister;
+                    chrBank1 = (byte)(loadRegister % chr4kBankCount);
                     if (chrRomBankMode == 0)
                     {
                         if (((loadRegister >> 4) & 1) == 0) { prgRamEnabled = true; }
@@ -74,15 +72,9 @@ namespace pNes
                     }
                     break;
                 case 3:
-                    if(prgRomBankMode == 0 || prgRomBankMode == 1)
-                    {
-                        prgBank = (byte)((loadRegister & 0xF) >> 1);
-                    }
-                    else
-                    {
-                        prgBank = (byte)(loadRegister & 0xF);
-                    } 
-                    //prgRamEnabled = ((loadRegister >> 4) & 0x1) != 0;
+                    loadRegister %= (byte)(prg16kBankCount);
+                    prgBank = loadRegister;
+                    prgRamEnabled = ((loadRegister >> 4) & 0x1) != 0;
                     break;
             }
             loadRegister = 0;
@@ -94,16 +86,13 @@ namespace pNes
         {
             if(address < 0x2000)
             {
-                if (_rom.chrRamEnabled)
-                {
-                    _rom.chrRom[address & (_rom.chrRom.Length - 1)] = data;
-                }
+                WriteCHR(address, data);
             }
             else if (address < 0x3F00)
             {
                 WriteVram(address, data);
             }
-            else if(address < 0x8000 && prgRamEnabled)
+            else if(address < 0x8000)
             {
                 prgRam[address & prgRamBankSize - 1] = data;
             }
@@ -122,7 +111,7 @@ namespace pNes
             {
                 return ReadVram(address);
             }
-            else if (address < 0x8000 && prgRamEnabled)
+            else if (address < 0x8000)
             {
                 return prgRam[address & prgRamBankSize - 1];
             }
@@ -138,27 +127,36 @@ namespace pNes
             //PRG ROM bank mode (0, 1: switch 32 KB at $8000, ignoring low bit of bank number;
             //                    | 2: fix first bank at $8000 and switch 16 KB bank at $C000;
             //                    | 3: fix last bank at $C000 and switch 16 KB bank at $8000)
+            int kAddress = address & (prgRomBankSize16k - 1);
             switch (prgRomBankMode)
             {
                 case 0:
-                case 1: return _rom.prgRom[(prgRomBankSize32k * prgBank) + (address & (prgRomBankSize32k - 1))];
-                case 2:
+                case 1:
                     if (address < 0xC000)
                     {
-                        return _rom.prgRom[address & (prgRomBankSize16k - 1)];
+                        return _rom.prgRom[(prgRomBankSize16k * (prgBank & 0xFE)) + kAddress];
                     }
                     else
                     {
-                        return _rom.prgRom[(prgRomBankSize16k * prgBank) + (address & (prgRomBankSize16k - 1))];
+                        return _rom.prgRom[(prgRomBankSize16k * (prgBank | 1)) + kAddress];
+                    }
+                case 2:
+                    if (address < 0xC000)
+                    {
+                        return _rom.prgRom[kAddress];
+                    }
+                    else
+                    {
+                        return _rom.prgRom[(prgRomBankSize16k * prgBank) + kAddress];
                     }
                 case 3:
                     if (address < 0xC000)
                     {
-                        return _rom.prgRom[(prgRomBankSize16k * prgBank) + (address & (prgRomBankSize16k - 1))];
+                        return _rom.prgRom[(prgRomBankSize16k * prgBank) + kAddress];
                     }
                     else
                     {
-                        return _rom.prgRom[(_rom.prgRom.Length - prgRomBankSize16k) + (address & (prgRomBankSize16k - 1))];
+                        return _rom.prgRom[(_rom.prgRom.Length - prgRomBankSize16k) + kAddress];
                     }
                 default:return 0;
 
@@ -169,20 +167,28 @@ namespace pNes
         protected override byte ReadCHR(int address)
         {
             // CHR ROM bank mode (0: switch 8 KB at a time; 1: switch two separate 4 KB banks)
-            if(chrRomBankMode != 0)
+            int kAddress = address & (chrRomBankSize4k - 1);
+            if (chrRomBankMode != 0)
             {
                 if(address < 0x1000)
                 {
-                    return _rom.chrRom[(chrBank0 * chrRomBankSize4k) + (address & (chrRomBankSize4k - 1))];
+                    return _rom.chrRom[(chrBank0 * chrRomBankSize4k) + kAddress];
                 }
                 else
                 {
-                    return _rom.chrRom[(chrBank1 * chrRomBankSize4k) + (address & (chrRomBankSize4k - 1))];
+                    return _rom.chrRom[(chrBank1 * chrRomBankSize4k) + kAddress];
                 }
             }
             else
             {
-                return _rom.chrRom[(chrBank0 * chrRomBankSize8k) + (address & (chrRomBankSize8k - 1))];
+                if (address < 0x1000)
+                {
+                    return _rom.chrRom[((chrBank0 & 0xFE) * chrRomBankSize4k) + kAddress];
+                }
+                else
+                {
+                    return _rom.chrRom[((chrBank0 | 1) * chrRomBankSize4k) + kAddress];
+                }
             }
         }
 

@@ -6,16 +6,15 @@ using System.Threading.Tasks;
 
 namespace pNes
 {
-    class Mapper2 : Mapper
+    class Mapper3 :Mapper
     {
-
-        private int prgBankNo;
+        private int chrBankNo;
 
         public override void WriteCart(int address, byte data)
         {
             if (address < 0x2000)
             {
-                WriteCHR(address, data); 
+                WriteCHR(address, data);
             }
             else if (address < 0x3F00)
             {
@@ -27,21 +26,13 @@ namespace pNes
             }
             else
             {
-                prgBankNo = data & 0xF;
+                chrBankNo = data & 0x3;
             }
         }
 
-        protected override byte ReadPRG(int address)
+        protected override byte ReadCHR(int address)
         {
-            if(address < 0xC000)
-            {
-                return _rom.prgRom[(address & (prgRomBankSize16k - 1)) + (prgBankNo * prgRomBankSize16k)];
-            }
-            else
-            {
-                return _rom.prgRom[(address & (prgRomBankSize16k - 1)) + (_rom.prgRom.Length - prgRomBankSize16k)];
-            }  
+            return _rom.chrRom[(address & (chrRomBankSize8k - 1)) + (chrBankNo * chrRomBankSize8k)];
         }
-
     }
 }

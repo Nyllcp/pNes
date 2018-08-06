@@ -12,20 +12,47 @@ namespace pNes
         protected Rom _rom;
 
         protected byte[] prgRam = new byte[prgRamBankSize];
-        protected byte[] sRam = new byte[prgRamBankSize];
         protected byte[,] ppuRam = new byte[4, ppuRamBankSize];
+        protected bool iflag = false;
+        protected bool verticalMirroring = false;
+
+        protected int prg32kBankCount = 0;
+        protected int prg16kBankCount = 0;
+        protected int prg8kBankCount = 0;
+
+        protected int chr8kBankCount = 0;
+        protected int chr4kBankCount = 0;
+        protected int chr2kBankCount = 0;
+        protected int chr1kBankCount = 0;
+
+
 
         protected const int prgRomBankSize32k = 0x8000;
         protected const int prgRomBankSize16k = 0x4000;
-        protected const int chrRomBankSize8k = 0x2000;
         protected const int prgRomBankSize8k = 0x2000;
+
+        protected const int chrRomBankSize8k = 0x2000;
         protected const int chrRomBankSize4k = 0x1000;
+        protected const int chrRomBankSize2k = 0x800;
+        protected const int chrRomBankSize1k = 0x400;
+
         protected const int prgRamBankSize = 0x2000;
         protected const int ppuRamBankSize = 0x400;
+
+        public bool Iflag { get { bool value = iflag; iflag = false; return value; } }
 
         public virtual void Init(Rom rom)
         {
             _rom = rom;
+            prg16kBankCount = _rom.prgRomCount;
+            prg32kBankCount = prg16kBankCount >> 1;
+            prg8kBankCount = prg16kBankCount << 1;
+
+            chr8kBankCount = _rom.chrRomCount;
+            chr4kBankCount = chr8kBankCount << 1;
+            chr2kBankCount = chr4kBankCount << 1;
+            chr1kBankCount = chr2kBankCount << 1;
+            verticalMirroring = _rom.verticalMirroring;
         }
 
         public virtual void Tick()
@@ -38,16 +65,13 @@ namespace pNes
         {
             if (address < 0x2000)
             {
-                if(_rom.chrRamEnabled)
-                {
-                    _rom.chrRom[address & (_rom.chrRom.Length - 1)] = data;
-                }
+                WriteCHR(address, data);
             }
             else if (address < 0x3F00)
             {
                 WriteVram(address, data);
             }
-            else if (address < 0x8000 && _rom.batteryRam)
+            else if (address < 0x8000)
             {
                 prgRam[address & prgRamBankSize - 1] = data;
             }
@@ -66,7 +90,7 @@ namespace pNes
             {
                 return ReadVram(address);
             }
-            else if (address < 0x8000 && _rom.batteryRam)
+            else if (address < 0x8000)
             {
                 return prgRam[address & prgRamBankSize - 1];
             }
@@ -87,9 +111,17 @@ namespace pNes
             return _rom.chrRom[address & (_rom.chrRom.Length - 1)];       
         }
 
+        protected virtual void WriteCHR(int address, byte data)
+        {
+            if (_rom.chrRamEnabled)
+            {
+                _rom.chrRom[address & (_rom.chrRom.Length - 1)] = data;
+            }
+        }
+
         protected virtual byte ReadVram(int address)
         {
-            if(_rom.verticalMirroring)
+            if(verticalMirroring)
             {
                 switch ((address >> 10) & 3)
                 {
@@ -116,7 +148,7 @@ namespace pNes
 
         protected virtual void WriteVram(int address, byte data)
         {
-            if (_rom.verticalMirroring)
+            if (verticalMirroring)
             {
                 switch ((address >> 10) & 3)
                 {
@@ -138,5 +170,6 @@ namespace pNes
             }
            
         }
+
     }
 }
