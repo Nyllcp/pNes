@@ -13,20 +13,20 @@ namespace pNes
         private Processor _cpu;
         private Ppu _ppu;
         private Apu _apu;
-
-        private const int cpuFreq = 1789773;
-
-        private byte pad1;
-        private bool strobingPad = false;
-        private int padShiftCounter = 0;
-
-        private int _lastCycles;
+        private Savestate[] _saveStates = new Savestate[10];
 
         private byte[] ram = new byte[0x800];
 
+        private const int cpuFreq = 1789773;
+        private byte pad1;
+        private bool strobingPad = false;
+        private int padShiftCounter = 0;
+        private int _lastCycles;
+        public bool saveState;
+        public bool loadState;
+        
         public uint[] Frame { get { return _ppu.Frame; } }
         public byte Pad1 { get { return pad1; } set { pad1 = value; } }
-
         public byte[] Samples { get { return _apu.Samples; } }
         public int NoOfSamples { get { int value = _apu.NumberOfSamples; _apu.NumberOfSamples = 0; return value; } }
         
@@ -37,6 +37,10 @@ namespace pNes
             _cpu = new Processor(this);
             _ppu = new Ppu(_cart,this);
             _apu = new Apu(this);
+            for(int i = 0; i < _saveStates.Length; i++)
+            {
+                _saveStates[i] = new Savestate();
+            }
         }
 
         public bool LoadRom(Rom rom)
@@ -53,6 +57,16 @@ namespace pNes
             {
                 MachineCycle();
             }
+            if(saveState)
+            {
+                WriteSaveState(0);
+                saveState = false;
+            }    
+            if (loadState)
+            {
+                LoadSaveState(0);
+                loadState = false;
+            }   
             int cyclesPerFrame = _cpu.GetCycleCount() - _lastCycles;
         }
 
@@ -158,6 +172,25 @@ namespace pNes
                 //$4020-$FFFF $BFE0 Cartridge space: PRG ROM, PRG RAM, and mapper registers (See Note)
                 _cart.WriteCart(address, data);
             }
+        }
+
+
+        private void WriteSaveState(int selectedState)
+        {
+            Array.Copy(ram, _saveStates[selectedState].ram, ram.Length);
+            _ppu.WriteSaveState(ref _saveStates[selectedState]);
+            _cpu.WriteSaveState(ref _saveStates[selectedState]);
+            _apu.WriteSaveState(ref _saveStates[selectedState]);
+            _cart.WriteSaveState(ref _saveStates[selectedState]);
+        }
+
+        private void LoadSaveState(int selectedState)
+        {
+            Array.Copy(_saveStates[selectedState].ram, ram, ram.Length);
+            _ppu.LoadSaveState(ref _saveStates[selectedState]);
+            _cpu.LoadSaveState(ref _saveStates[selectedState]);
+            _apu.LoadSaveState(ref _saveStates[selectedState]);
+            _cart.LoadSaveState(ref _saveStates[selectedState]);
         }
 
 

@@ -20,20 +20,18 @@ namespace pNes
 
         const int nesWidth = 256;
         const int nesHeight = 240;
+        private const int spriteBGpriority = 0x80;
+        private const int spriteZeroFlag = 0x40;
 
         private byte[] oam = new byte[0x100];
         private SpriteObject[] sOam = new SpriteObject[8];
-        private SpriteObject[] renderOam = new SpriteObject[8];
-        private byte[] scanlinebuffer = new byte[256];
+        private byte[] scanlineBuffer = new byte[256];
+        private byte[] spriteScanlineBuffer = new byte[256];
         private uint[] _frame = new uint[nesWidth * nesHeight];
         private byte[] paletteRam = new byte[0x20];
-
-        private byte ppuCtrl;
-        private byte ppuMask;
+   
         private byte oamAddr;
         private byte lastWritten;
-        private byte xScroll;
-        private byte yScroll;
         private byte readBuffer;
 
         private byte tileAttribute;
@@ -51,12 +49,11 @@ namespace pNes
         private int currentScanline = 0;
         private int fineX;
         private int currentDot;
-
         private bool largeSprites = false;
         private bool vblank_NMI = false;
         private bool grayScale = false;
-        private bool showLeftBg = false;
-        private bool showLeftSprite = false;
+        private bool showLeftBg = true;
+        private bool showLeftSprite = true;
         private bool bgEnabled = false;
         private bool spritesEnabled = false;
         private bool spriteOverflow = false;
@@ -65,9 +62,6 @@ namespace pNes
         private bool addressLatch = false;
         private bool oddFrame = false;
         private bool frameReady = false;
-        private bool sprite0evaluated = false;
-
-
         public bool FrameReady { get { bool value = frameReady; frameReady = false; return value; } }
 
         public uint[] Frame { get { return _frame; } }
@@ -79,7 +73,6 @@ namespace pNes
             for(int i = 0; i < sOam.Length; i++)
             {
                 sOam[i] = new SpriteObject(this);
-                renderOam[i] = new SpriteObject(this);
             }
         }
 
@@ -89,11 +82,32 @@ namespace pNes
             currentDot = ppuCycles % 341;
             ppuCycles++;
 
+            if (currentDot == 340)
+            {
+                if (currentScanline <= 239)
+                {
+                    for (int i = 0; i < scanlineBuffer.Length; i++)
+                    {
+                        _frame[i + (currentScanline * nesWidth)] = PalleteRGBlookup[paletteRam[scanlineBuffer[i]]];
+                    }
+                }
+                currentScanline++;
+                if (currentScanline > 261)
+                {
+                    currentScanline = 0;
+                    ppuCycles = 0;
+
+                }
+
+            }
+            if (currentScanline >= 242 && currentScanline <= 260)
+                return;
+
             FetchTimer();
             BgRenderer();
             
             if(currentDot == 65)SpriteEvalution();
-            if(currentDot == 256)SpriteRenderer();
+            if (currentDot == 321) SpriteRenderer();
 
             if (currentScanline == 241 && currentDot == 1)
             {
@@ -129,24 +143,7 @@ namespace pNes
                 }
                
             }
-            if (currentDot == 340)
-            {
-                if(currentScanline <= 239)
-                {
-                    for (int i = 0; i < scanlinebuffer.Length; i++)
-                    {     
-                        _frame[i + (currentScanline * nesWidth)] = PalleteRGBlookup[paletteRam[scanlinebuffer[i]]];
-                    }
-                }
-                currentScanline++;
-                if (currentScanline > 261)
-                {
-                    currentScanline = 0;
-                    ppuCycles = 0;
-                    
-                }
-
-            }
+            
         }
 
         private void SpriteEvalution()
@@ -161,11 +158,11 @@ namespace pNes
                 for (int i = oamAddr; i < oam.Length; i += 4)
                 {
                     byte ypos = oam[i];
+                    if (ypos > 0xEF) continue;
                     if (currentScanline >= ypos && currentScanline <=  ypos  + (largeSprites ? 15 : 7))
                     {
-                        if (i == oamAddr && !sprite0Hit)
+                        if (i == 0 && !sprite0Hit)
                         {
-                            sprite0evaluated = true;
                             sOam[i].isSprite0 = true;
                         }
                         if (numberOfSprites < 8)
@@ -187,20 +184,24 @@ namespace pNes
 
         private void SpriteRenderer()
         {
-            if (spritesEnabled && currentScanline != 0 && currentScanline <= 239)
+            if (spritesEnabled && currentScanline <= 239)
             {
-                for(int i = renderOam.Length - 1; i >= 0; i--)
+                int pixel = 0;
+                spriteScanlineBuffer = Enumerable.Repeat<byte>(0, spriteScanlineBuffer.Length).ToArray();
+                for (int i = 0; i < sOam.Length;i++)
                 {
-                    if (renderOam[i].Ypos > 0xEF) continue;
-                    int pixel = 0;
-                    for(int j = 0; j < 8; j++)
+                    if (sOam[i].Ypos > 0xEF) continue;
+
+                    for (int j = 0; j < 8; j++)
                     {
-                        if (renderOam[i].Xpos + j > scanlinebuffer.Length - 1) break;
-                        if (!showLeftSprite && (renderOam[i].Xpos + j) < 8) continue;
-                        if (renderOam[i].BehindBG && (scanlinebuffer[renderOam[i].Xpos + j] & 3) != 0) { continue; }
-                        pixel = renderOam[i].GetPixel(j);
+                        if (sOam[i].Xpos + j > spriteScanlineBuffer.Length - 1) break;
+                        if (spriteScanlineBuffer[sOam[i].Xpos + j] != 0) continue;
+                        if (!showLeftSprite && (sOam[i].Xpos + j) < 8) continue;
+                        pixel = sOam[i].GetPixel(j);
                         if ((pixel & 0x3) == 0) { continue; }
-                        scanlinebuffer[renderOam[i].Xpos + j] = (byte)pixel;
+                        pixel |= sOam[i].BehindBG ? spriteBGpriority : 0;
+                        pixel |= sOam[i].isSprite0 ? spriteZeroFlag : 0;
+                        spriteScanlineBuffer[sOam[i].Xpos + j] = (byte)pixel;
                     }
                 }
             }
@@ -209,33 +210,33 @@ namespace pNes
 
         private void FetchTimer()
         {
-            if (currentScanline <= 239 || currentScanline == 261)
+            if (currentScanline <= 239 && currentDot % 8 == 0 || currentScanline == 261 && currentDot % 8 == 0)
             {
 
                 if (bgEnabled || spritesEnabled)
                 {
-                    if (currentDot != 0 && (currentDot % 8) == 0 && currentDot < 256 || (currentDot % 8) == 0 && currentDot >= 328)
+                    if (currentDot != 0 && currentDot < 256 || currentDot >= 328)
                     {
                         FetchNewTile();
                     }
-                    if (currentDot == 256)
+                    else if (currentDot >= 264 && currentDot <= 320)
                     {
-                        IncrementY();   
+                        int index = (currentDot - 264) / 8;
+                        sOam[index].LoadTiledata(currentScanline, spriteTableAddress, largeSprites);
+
                     }
-                    if (currentDot == 257)
+                    else if (currentDot == 256)
                     {
-                        //ppuAddress &= ~0x1F;
+                        IncrementY();
                         ppuAddress &= ~0x41F;
-                        //ppuAddress |= tempPpuAddress & 0x1F;
                         ppuAddress |= tempPpuAddress & 0x41F;
                         oamAddr = 0;
                     }
-                    if((currentDot % 8) == 0 && currentDot >= 264 && currentDot <= 320)
+                    else if (currentDot == 257)
                     {
-                        int index = (currentDot - 264) / 8;
-                        renderOam[index].CopySprite(sOam[index]);
-                        renderOam[index].LoadTiledata(currentScanline, spriteTableAddress, largeSprites);
+                        
                     }
+                    
 
                 }
 
@@ -250,19 +251,6 @@ namespace pNes
                 int pixelplace = (currentDot % 8) + fineX;
                 pixel |= (byte)((tileData0 >> (15 - pixelplace)) & 0x1);
                 pixel |= (byte)(((tileData1 >> (15 - pixelplace)) & 0x1) << 1);
-                if(sprite0evaluated && currentDot > 1 && currentDot < 255 && renderOam[0].isSprite0 && spritesEnabled)
-                {
-                    if(currentDot >= renderOam[0].Xpos  && currentDot <= (renderOam[0].Xpos + 7))
-                    {
-                        int sprite0pixel = renderOam[0].GetPixel(currentDot - renderOam[0].Xpos);
-                        if((pixel & 3) != 0 && (sprite0pixel & 3) != 0)
-                        {
-                            sprite0Hit = true;
-                            sprite0evaluated = false;
-                        }
-                    }
-                 
-                }
                 if(pixelplace > 7)
                 {
                     if ((IncrementedPpuAddress(ppuAddress) & 64) != 64)
@@ -321,11 +309,19 @@ namespace pNes
                 {
                     pixel = 0;
                 }
-                scanlinebuffer[currentDot] = pixel;
+                byte spritePixel = spriteScanlineBuffer[currentDot];
+                if (pixel == 0) pixel = spritePixel;
+                if(!sprite0Hit && (spritePixel & spriteZeroFlag) != 0)
+                {
+                    if (pixel != 0 && (spritePixel & 0x3) != 0 ) sprite0Hit = true;
+                }
+                if (pixel != 0 && (spritePixel & 0x3) != 0 && (spritePixel & spriteBGpriority) == 0) pixel = spritePixel;
+                pixel &= 0x1f;
+                scanlineBuffer[currentDot] = pixel;
             }
             if (currentDot < 256 && currentScanline <= 239 && !bgEnabled)
             {
-                scanlinebuffer[currentDot] = 0;
+                scanlineBuffer[currentDot] = 0;
             }
         }
 
@@ -336,10 +332,6 @@ namespace pNes
             int attributeAddress = 0x23C0 | (ppuAddress & 0x0C00) | ((ppuAddress >> 4) & 0x38) | ((ppuAddress >> 2) & 0x07); 
             int row = (ppuAddress >> 12) & 0x7;
             tilePointer = ((ReadPpuMemory(tileAddress) * 0x10) + row) | backgroundTableAdress;
-            if(tilePointer > 0x1020)
-            {
-
-            }
             tileAttribute = bufferTileAttribute;
             tileData0 = (tileData0 & 0xFF) << 8;
             tileData1 = (tileData1 & 0xFF) << 8;
@@ -423,14 +415,12 @@ namespace pNes
                     {
                         if (!addressLatch)
                         {
-                            xScroll = data;
                             fineX = data & 0x7;
                             tempPpuAddress &= ~0x1F;
                             tempPpuAddress |= data >> 3;
                         }                     
                         else
-                        {
-                            yScroll = data;
+                        { 
                             tempPpuAddress &= 0x8C1F;
                             tempPpuAddress |= (data & 0x7) << 12;
                             tempPpuAddress |= ((data >> 3) & 0x7) << 5;
@@ -471,13 +461,9 @@ namespace pNes
 
         public void WritePpuMemory(int address, byte data)
         {
-            if(address < 0x2000)
+
+            if(address < 0x3F00)
             {
-                _cart.WriteCart(address, data);
-            }
-            else if(address < 0x3F00)
-            {
-                //vram[address & 0x7FF] = data;
                 _cart.WriteCart(address, data);
             }
             else
@@ -492,11 +478,7 @@ namespace pNes
         public byte ReadPpuMemory(int address)
         {
             
-            if (address < 0x2000)
-            {
-                return _cart.ReadCart(address);
-            }
-            else if (address < 0x3F00)
+            if (address < 0x3F00)
             {
                 return _cart.ReadCart(address);
             }
@@ -544,7 +526,6 @@ namespace pNes
 
         private void WritePpuMask(byte data)
         {
-            ppuMask = data;
             grayScale = (data & 1) != 0;
             showLeftBg = ((data >> 1) & 1) != 0;
             showLeftSprite = ((data >> 2) & 1) != 0;
@@ -555,7 +536,6 @@ namespace pNes
 
         private void WritePpuCtrl(byte data)
         {
-            ppuCtrl = data;
             tempPpuAddress &= ~0xC00;
             tempPpuAddress |= (data & 3) << 10;
             vramAddressIncrement = ((data >> 2) & 1) != 0 ? 0x20 : 0x1;
@@ -565,14 +545,81 @@ namespace pNes
             vblank_NMI = ((data >> 7) & 1) != 0;
         }
 
-        public bool CheckNMI()
+
+        public void WriteSaveState(ref Savestate state)
         {
-            if(inVblank && vblank_NMI)
-            {
-                vblank_NMI = false;
-                return true;
-            }
-            return false;
+            Array.Copy(oam, state.oam, oam.Length);
+            Array.Copy(sOam, state.sOam, sOam.Length);
+            Array.Copy(paletteRam, state.paletteRam, paletteRam.Length);
+            state.oamAddr = oamAddr;
+            state.lastWritten = lastWritten;
+            state.readBuffer = readBuffer;
+            state.tileAttribute = tileAttribute;
+            state.bufferTileAttribute = bufferTileAttribute;
+            state.tileData0 = tileData0;
+            state.tileData1 = tileData1;
+            state.tilePointer = tilePointer;
+            state.ppuAddress = ppuAddress;
+            state.tempPpuAddress = tempPpuAddress;
+            state.spriteTableAddress = spriteTableAddress;
+            state.backgroundTableAdress = backgroundTableAdress;
+            state.vramAddressIncrement = vramAddressIncrement;
+            state.ppuCycles = ppuCycles;
+            state.currentScanline = currentScanline;
+            state.fineX = fineX;
+            state.currentDot = currentDot;
+            state.largeSprites = largeSprites;
+            state.vblank_NMI = vblank_NMI;
+            state.grayScale = grayScale;
+            state.showLeftBg = showLeftBg;
+            state.showLeftSprite = showLeftSprite;
+            state.bgEnabled = bgEnabled;
+            state.spritesEnabled = spritesEnabled;
+            state.spriteOverflow = spriteOverflow;
+            state.sprite0Hit = sprite0Hit;
+            state.inVblank = inVblank;
+            state.addressLatch = addressLatch;
+            state.oddFrame = oddFrame;
+            state.frameReady = frameReady;
         }
+
+
+        public void LoadSaveState(ref Savestate state)
+        {
+            Array.Copy(state.oam, oam, oam.Length);
+            Array.Copy(state.sOam, sOam, sOam.Length);
+            Array.Copy(state.paletteRam, paletteRam, paletteRam.Length);
+            oamAddr = state.oamAddr;
+            lastWritten = state.lastWritten;
+            readBuffer = state.readBuffer;
+            tileAttribute = state.tileAttribute;
+            bufferTileAttribute = state.bufferTileAttribute;
+            tileData0 = state.tileData0;
+            tileData1 = state.tileData1;
+            tilePointer = state.tilePointer;
+            ppuAddress = state.ppuAddress;
+            tempPpuAddress = state.tempPpuAddress;
+            spriteTableAddress = state.spriteTableAddress;
+            backgroundTableAdress = state.backgroundTableAdress;
+            vramAddressIncrement = state.vramAddressIncrement;
+            ppuCycles = state.ppuCycles;
+            currentScanline = state.currentScanline;
+            fineX = state.fineX;
+            currentDot = state.currentDot;
+            largeSprites = state.largeSprites;
+            vblank_NMI = state.vblank_NMI;
+            grayScale = state.grayScale;
+            showLeftBg = state.showLeftBg;
+            showLeftSprite = state.showLeftSprite;
+            bgEnabled = state.bgEnabled;
+            spritesEnabled = state.spritesEnabled;
+            spriteOverflow = state.spriteOverflow;
+            sprite0Hit = state.sprite0Hit;
+            inVblank = state.inVblank;
+            addressLatch = state.addressLatch;
+            oddFrame = state.oddFrame;
+            frameReady = state.frameReady;
+        }
+
     }
 }

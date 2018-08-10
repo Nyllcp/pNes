@@ -32,6 +32,7 @@ namespace pNes
         public void ClearSprite()
         {
             SpriteData = Enumerable.Repeat<byte>(0xFF, SpriteData.Length).ToArray();
+            isSprite0 = false;
         }
 
         public void LoadTiledata(int scanline, int spriteTableAddress, bool largeSprites)
@@ -78,11 +79,6 @@ namespace pNes
             return (byte)pixel;
         }
 
-        public void CopySprite(SpriteObject sprite)
-        {
-            Array.Copy(sprite.SpriteData, this.SpriteData, this.SpriteData.Length);
-            this.isSprite0 = sprite.isSprite0;
-        }
 
     }
 }

@@ -19,27 +19,8 @@ namespace pNes
         private int irqCounter;
         private int lastAddress;
 
-        public override void WriteCart(int address, byte data)
-        {
-            if (address < 0x2000)
-            {
-                WriteCHR(address, data);
-            }
-            else if (address < 0x3F00)
-            {
-                WriteVram(address, data);
-            }
-            else if (address < 0x8000)
-            {
-                prgRam[address & prgRamBankSize - 1] = data;
-            }
-            else
-            {
-                WriteReg(address, data);
-            }
-        }
 
-        private void WriteReg(int address, byte data)
+        protected override void WritePRG(int address, byte data)
         {
             if(address < 0xA000)
             {
@@ -188,6 +169,30 @@ namespace pNes
                 }
             }
             
+        }
+        public override void WriteSaveState(ref Savestate state)
+        {
+            Array.Copy(bankRegigster, state.bankRegigster, bankRegigster.Length);
+            state.prgBankMode8000 = prgBankMode8000;
+            state.chr2kHigh = chr2kHigh;
+            state.bankWriteSelect = bankWriteSelect;
+            state.irqEnabled = irqEnabled;
+            state.irqLatch = irqLatch;
+            state.irqCounter = irqCounter;
+            state.lastAddress = lastAddress;
+            base.WriteSaveState(ref state);
+        }
+        public override void LoadSaveState(ref Savestate state)
+        {
+            Array.Copy(state.bankRegigster, bankRegigster, bankRegigster.Length);
+            prgBankMode8000 = state.prgBankMode8000;
+            chr2kHigh = state.chr2kHigh;
+            bankWriteSelect = state.bankWriteSelect;
+            irqEnabled = state.irqEnabled;
+            irqLatch = state.irqLatch;
+            irqCounter = state.irqCounter;
+            lastAddress = state.lastAddress;
+            base.LoadSaveState(ref state);
         }
     }
 }

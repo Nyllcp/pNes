@@ -34,7 +34,7 @@ namespace pNes
             if (cyclesBetweenWrites > 0) cyclesBetweenWrites--;
         }
 
-        private void WriteReg(int address, byte data)
+        protected override void WritePRG(int address, byte data)
         {
             if (cyclesBetweenWrites > 0) return;
             cyclesBetweenWrites = 3;
@@ -82,45 +82,6 @@ namespace pNes
 
         }
 
-        public override void WriteCart(int address, byte data)
-        {
-            if(address < 0x2000)
-            {
-                WriteCHR(address, data);
-            }
-            else if (address < 0x3F00)
-            {
-                WriteVram(address, data);
-            }
-            else if(address < 0x8000)
-            {
-                prgRam[address & prgRamBankSize - 1] = data;
-            }
-            else
-            {
-                WriteReg(address, data);
-            }
-        }
-        public override byte ReadCart(int address)
-        {
-            if(address < 0x2000) //ChrRom
-            {
-                return ReadCHR(address);
-            }
-            else if (address < 0x3F00)
-            {
-                return ReadVram(address);
-            }
-            else if (address < 0x8000)
-            {
-                return prgRam[address & prgRamBankSize - 1];
-            }
-            else
-            {
-                return ReadPRG(address);
-            }
-
-        }
 
         protected override byte ReadPRG(int address)
         {
@@ -278,6 +239,33 @@ namespace pNes
                     }
                     break;
             }
+        }
+
+        public override void WriteSaveState(ref Savestate state)
+        {
+            state.loadRegister = loadRegister;
+            state.shiftCount = shiftCount;
+            state.currentMirroring = currentMirroring;
+            state.prgRomBankMode = prgRomBankMode;
+            state.chrRomBankMode = chrRomBankMode;
+            state.chrBank0 = chrBank0;
+            state.chrBank1 = chrBank1;
+            state.prgBank = prgBank;
+            state.prgRamEnabled = prgRamEnabled;
+            base.WriteSaveState(ref state);
+        }
+        public override void LoadSaveState(ref Savestate state)
+        {
+            loadRegister = state.loadRegister;
+            shiftCount = state.shiftCount;
+            currentMirroring = state.currentMirroring;
+            prgRomBankMode = state.prgRomBankMode;
+            chrRomBankMode = state.chrRomBankMode;
+            chrBank0 = state.chrBank0;
+            chrBank1 = state.chrBank1;
+            prgBank = state.prgBank;
+            prgRamEnabled = state.prgRamEnabled;
+            base.LoadSaveState(ref state);
         }
     }
 }

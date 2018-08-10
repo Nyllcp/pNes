@@ -12,6 +12,7 @@ namespace pNes
     {
         public byte[] prgRom;
         public byte[] chrRom;
+        public byte[] prgRam;
 
         public int prgRomCount;
         public int chrRomCount;
@@ -28,12 +29,16 @@ namespace pNes
         private const int chrRomBankSize8k = 0x2000;
         private const int prgRamBankSize = 0x2000;
 
+        private string fileName;
+        private string saveName;
+
         public Rom() { }
 
         public bool Load(string fileName)
         {
             MemoryStream ms = new MemoryStream();
             BinaryReader reader;
+            this.fileName = fileName;
 
 
             if (Path.GetExtension(fileName) == ".zip")
@@ -95,6 +100,7 @@ namespace pNes
             prgRom = new byte[prgRomCount * prgRomBankSize16k];
             if (!chrRamEnabled) chrRom = new byte[chrRomCount * chrRomBankSize8k];
             else chrRom = new byte[chrRomBankSize8k];
+            prgRam = new byte[prgRamBankSize];
             int startAdress = trainer ? 0x10 + 0x200 : 0x10;
             reader.BaseStream.Seek(startAdress, SeekOrigin.Begin);
             
@@ -109,10 +115,39 @@ namespace pNes
             }
 
             reader.Close();
+            if(batteryRam)
+            {
+                saveName = Path.ChangeExtension(fileName, ".sav"); 
+                if(File.Exists(saveName))
+                {
+                    reader = new BinaryReader(File.Open(saveName , FileMode.Open));
+                    reader.BaseStream.Seek(0, SeekOrigin.Begin);
+                    reader.Read(prgRam, 0, prgRam.Length);
+                    reader.Close();     
+                }
+                else
+                {
+                    SavePRGRam();
+                }
+                
+            }
 
             return true;
 
          
+        }
+
+        public void SavePRGRam()
+        {
+            if(batteryRam)
+            {
+                using (BinaryWriter writer = new BinaryWriter(File.Open(saveName, FileMode.OpenOrCreate)))
+                {
+                    writer.Write(prgRam, 0, prgRam.Length);
+                    writer.Close();
+                }
+            }
+            
         }
     }
 }

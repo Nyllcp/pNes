@@ -25,6 +25,7 @@ namespace pNes
         private OpenFileDialog _ofd;
         private Core _nes;
         private Rom _rom;
+        
 
 
         const int nesWidth = 256;
@@ -41,6 +42,7 @@ namespace pNes
         private bool run = false;
         private bool frameLimit = true;
         private bool frameLimitToggle = false;
+        private bool saveStateToggle = false;
 
         public Main()
         {
@@ -85,6 +87,9 @@ namespace pNes
         private void RunEmulation()
         {
             run = true;
+            _clock.Restart();
+            lastTime = 0;
+            frames = 0;
             while(run)
             {
                 _drawingSurface.Select();
@@ -114,7 +119,6 @@ namespace pNes
                 curentTime = _clock.ElapsedTime.AsMilliseconds();
                 if (curentTime - lastTime > 1000)
                 {
-                    //toolStripStatusFps.Text = "FPS: " + frames.ToString() + " Cpu Cycles Per Frame : " + cyclesperframe.ToString() + " Bytes in audio buffer:" + _audio.GetBufferedBytes();
                     toolStripStatusFps.Text = "FPS: " + frames.ToString();
                     frames = 0;
                     lastTime = _clock.ElapsedTime.AsMilliseconds();
@@ -151,7 +155,7 @@ namespace pNes
 
         private void openToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            //if (_gameboy != null) _gameboy.WriteSave();
+            if (_rom != null) _rom.SavePRGRam();
             if (_ofd.ShowDialog() == DialogResult.OK)
             {
                 run = false;
@@ -179,11 +183,7 @@ namespace pNes
 
   
 
-        private void exitToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            run = false;
-            Application.Exit();
-        }
+ 
 
         private void Input()
         {
@@ -232,23 +232,44 @@ namespace pNes
             }
             frameLimitToggle = SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.Q) | SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.C);
 
-            //if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.E) && !saveStateToggle)
-            //{
-            //    _gameboy.SaveState = true;
-            //}
-            //if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.R) && !saveStateToggle)
-            //{
-            //    _gameboy.LoadState = true;
-            //}
-            //saveStateToggle = SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.R) | SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.E);
+            if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.E) && !saveStateToggle)
+            {
+                _nes.saveState = true;
+            }
+            if (SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.R) && !saveStateToggle)
+            {
+                _nes.loadState = true;
+            }
+            saveStateToggle = SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.R) | SFML.Window.Keyboard.IsKeyPressed(Keyboard.Key.E);
 
         }
 
         private void Main_FormClosing(object sender, FormClosingEventArgs e)
         {
             run = false;
+            if (_rom != null) _rom.SavePRGRam();
             Application.Exit();
         }
 
+        private void exitToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            run = false;
+            if(_rom != null)_rom.SavePRGRam();
+            Application.Exit();
+        }
+
+        private void resetToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            run = false;
+            if(_rom != null)
+            {
+                _nes = new Core();
+                if (_nes.LoadRom(_rom))
+                {
+                    _clock.Restart().AsMilliseconds();
+                    RunEmulation();
+                }
+            }
+        }
     }
 }

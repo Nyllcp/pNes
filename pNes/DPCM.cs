@@ -32,7 +32,7 @@ namespace pNes
         public int sampleLenghtCounter;
 
         public int Sample = 0;
-        public bool iFlag = false;
+        public bool dpcmiFlag = false;
 
         private bool bufferAvailable = false;
 
@@ -90,7 +90,7 @@ namespace pNes
                             }
                             else
                             {
-                                iFlag = interruptEnable;
+                                dpcmiFlag = interruptEnable;
                             }
                         }
 
@@ -113,7 +113,7 @@ namespace pNes
             {
                 sampleLenghtCounter = 0;
             }
-            iFlag = false;
+            dpcmiFlag = false;
         }
 
         public void WriteReg(int address, byte data)

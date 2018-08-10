@@ -23,6 +23,9 @@ namespace pNes
                 case 2: _mapper = new Mapper2(); _mapper.Init(rom); break;
                 case 3: _mapper = new Mapper3(); _mapper.Init(rom); break;
                 case 4: _mapper = new Mapper4(); _mapper.Init(rom); break;
+                case 7: _mapper = new Mapper7(); _mapper.Init(rom); break;
+                case 9: _mapper = new Mapper9(); _mapper.Init(rom); break;
+                case 66: _mapper = new Mapper66(); _mapper.Init(rom); break;
             }
 
             return _mapper != null;
@@ -41,6 +44,15 @@ namespace pNes
         public void Tick()
         {
             _mapper.Tick();
+        }
+
+        public void WriteSaveState(ref Savestate state)
+        {
+            _mapper.WriteSaveState(ref state);
+        }
+        public void LoadSaveState(ref Savestate state)
+        {
+            _mapper.LoadSaveState(ref state);
         }
     }
 }

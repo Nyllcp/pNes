@@ -369,10 +369,50 @@ namespace pNes
             _cycleCount = 0;
         }
 
-        /// <summary>
-        /// Dumps the entire memory object. Used when saving the memory state
-        /// </summary>
-        /// <returns></returns>
+        public void WriteSaveState(ref Savestate state)
+        {
+            state._programCounter = _programCounter;
+            state._stackPointer = _stackPointer;
+            state._cycleCount = _cycleCount;
+            state._cycleCountStep = _cycleCountStep;
+            state._previousInterrupt = _previousInterrupt;
+            state._interrupt = _interrupt;
+            state.Accumulator = Accumulator;
+            state.XRegister = XRegister;
+            state.YRegister = YRegister;
+            state.CurrentOpCode = CurrentOpCode;
+            state.CarryFlag = CarryFlag;
+            state.ZeroFlag = ZeroFlag;
+            state.DisableInterruptFlag = DisableInterruptFlag;
+            state.DecimalFlag = DecimalFlag;
+            state.OverflowFlag = OverflowFlag;
+            state.NegativeFlag = NegativeFlag;
+            state.TriggerNmi = TriggerNmi;
+            state.TriggerIRQ = TriggerIRQ;
+        }
+
+        public void LoadSaveState(ref Savestate state)
+        {
+            _programCounter = state._programCounter;
+            _stackPointer = state._stackPointer;
+            _cycleCount = state._cycleCount;
+            _cycleCountStep = state._cycleCountStep;
+            _previousInterrupt = state._previousInterrupt;
+            _interrupt = state._interrupt;
+            Accumulator = state.Accumulator;
+            XRegister = state.XRegister;
+            YRegister = state.YRegister;
+            CurrentOpCode = state.CurrentOpCode;
+            CarryFlag = state.CarryFlag;
+            ZeroFlag = state.ZeroFlag;
+            DisableInterruptFlag = state.DisableInterruptFlag;
+            DecimalFlag = state.DecimalFlag;
+            OverflowFlag = state.OverflowFlag;
+            NegativeFlag = state.NegativeFlag;
+            TriggerNmi = state.TriggerNmi;
+            TriggerIRQ = state.TriggerIRQ;
+        }
+
 
         #endregion
 

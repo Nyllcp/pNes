@@ -116,6 +116,9 @@
     <Compile Include="Mappers\Mapper2.cs" />
     <Compile Include="Mappers\Mapper3.cs" />
     <Compile Include="Mappers\Mapper4.cs" />
+    <Compile Include="Mappers\Mapper66.cs" />
+    <Compile Include="Mappers\Mapper7.cs" />
+    <Compile Include="Mappers\Mapper9.cs" />
     <Compile Include="NoiseChannel.cs" />
     <Compile Include="Ppu.cs" />
     <Compile Include="Processor.cs" />
@@ -123,6 +126,7 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="PulseChannel.cs" />
     <Compile Include="Rom.cs" />
+    <Compile Include="Savestate.cs" />
     <Compile Include="Sprite.cs" />
     <Compile Include="TriangleChannel.cs" />
     <EmbeddedResource Include="Main.resx">

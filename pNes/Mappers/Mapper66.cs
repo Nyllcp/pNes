@@ -6,39 +6,43 @@ using System.Threading.Tasks;
 
 namespace pNes
 {
-    class Mapper2 : Mapper
+    class Mapper66 : Mapper
     {
 
         private int prgBankNo;
+        private int chrBankNo;
 
 
         protected override void WritePRG(int address, byte data)
         {
-            prgBankNo = data & 0xF;
+            chrBankNo = (data & 0x3) % chr8kBankCount;
+            prgBankNo = ((data >> 4) & 0x3) % prg32kBankCount;
         }
 
         protected override byte ReadPRG(int address)
         {
-            if(address < 0xC000)
-            {
-                return _rom.prgRom[(address & (prgRomBankSize16k - 1)) + (prgBankNo * prgRomBankSize16k)];
-            }
-            else
-            {
-                return _rom.prgRom[(address & (prgRomBankSize16k - 1)) + (_rom.prgRom.Length - prgRomBankSize16k)];
-            }  
+            address &= prgRomBankSize32k - 1;
+            return _rom.prgRom[address + (prgBankNo * prgRomBankSize32k)];
+
+        }
+
+        protected override byte ReadCHR(int address)
+        {
+            address &= chrRomBankSize8k - 1;
+            return _rom.chrRom[address + (chrBankNo * chrRomBankSize8k)];
         }
 
         public override void WriteSaveState(ref Savestate state)
         {
+            state.chrBankNo = chrBankNo;
             state.prgBankNo = prgBankNo;
             base.WriteSaveState(ref state);
         }
         public override void LoadSaveState(ref Savestate state)
         {
+            chrBankNo = state.chrBankNo;
             prgBankNo = state.prgBankNo;
             base.LoadSaveState(ref state);
         }
-
     }
 }

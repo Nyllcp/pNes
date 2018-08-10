@@ -35,7 +35,7 @@ namespace pNes
         private bool mode0 = true;
         private bool disableInterrupt = true;
 
-        public bool IFlag { get { bool value = iFlag || _dpcm.iFlag; iFlag = false; return value; } }
+        public bool IFlag { get { bool value = iFlag || _dpcm.dpcmiFlag; iFlag = false; return value; } }
 
         public Apu(Core core)
         {
@@ -199,7 +199,7 @@ namespace pNes
             switch (address)
             {
                 case 0x15:
-                    int value = _dpcm.iFlag == true ? 1 << 7 : 0;
+                    int value = _dpcm.dpcmiFlag == true ? 1 << 7 : 0;
                     value |= iFlag == true ? 1 << 6 : 0;
                     iFlag = false;
                     value |= (_dpcm.sampleLenghtCounter > 0) ? 1 << 4 : 0;
@@ -225,6 +225,25 @@ namespace pNes
             {
                 _tndLookup[i] = (Int16)((163.67 / (24329.0 / i + 100)) * (float)Int16.MaxValue);
             }
+        }
+
+        public void WriteSaveState(ref Savestate state)
+        {
+            state.apuCycles = apuCycles;
+            state.sampleCycles = sampleCycles;
+            state.iFlag = iFlag;
+            state.mode0 = mode0;
+            state.disableInterrupt = disableInterrupt;
+            state.apuEveryOtherCycle = apuEveryOtherCycle;
+        }
+        public void LoadSaveState(ref Savestate state)
+        {
+            apuCycles = state.apuCycles;
+            sampleCycles = state.sampleCycles;
+            iFlag = state.iFlag;
+            mode0 = state.mode0;
+            disableInterrupt = state.disableInterrupt;
+            apuEveryOtherCycle = state.apuEveryOtherCycle;
         }
     }
 

@@ -11,7 +11,6 @@ namespace pNes
 
         protected Rom _rom;
 
-        protected byte[] prgRam = new byte[prgRamBankSize];
         protected byte[,] ppuRam = new byte[4, ppuRamBankSize];
         protected bool iflag = false;
         protected bool verticalMirroring = false;
@@ -73,13 +72,15 @@ namespace pNes
             }
             else if (address < 0x8000)
             {
-                prgRam[address & prgRamBankSize - 1] = data;
+                _rom.prgRam[address & prgRamBankSize - 1] = data;
             }
             else
             {
-              
+                WritePRG(address, data);
             }
         }
+
+      
         public virtual byte ReadCart(int address)
         {
             if (address < 0x2000) //ChrRom
@@ -92,7 +93,7 @@ namespace pNes
             }
             else if (address < 0x8000)
             {
-                return prgRam[address & prgRamBankSize - 1];
+                return _rom.prgRam[address & prgRamBankSize - 1];
             }
             else
             {
@@ -101,9 +102,15 @@ namespace pNes
 
         }
 
+      
+
         protected virtual byte ReadPRG(int address)
         {
             return _rom.prgRom[address & (_rom.prgRom.Length - 1)];
+        }
+        protected virtual void WritePRG(int address, byte data)
+        {
+            //Mapper 0 doesnt support prgwrite
         }
 
         protected virtual byte ReadCHR(int address)
@@ -169,6 +176,31 @@ namespace pNes
                 }
             }
            
+        }
+
+        public virtual void WriteSaveState(ref Savestate state)
+        {
+            Array.Copy(ppuRam, state.ppuRam, ppuRam.Length);
+            Array.Copy(_rom.prgRam, state.prgRam, state.prgRam.Length);
+            if(_rom.chrRamEnabled)
+            {
+                Array.Copy(_rom.chrRom, state.chrRom, state.chrRom.Length);
+            }
+            state.iflag = iflag;
+            state.verticalMirroring = verticalMirroring;
+            
+        }
+        public virtual void LoadSaveState(ref Savestate state)
+        {
+            Array.Copy(state.ppuRam, ppuRam, ppuRam.Length);
+            Array.Copy(state.prgRam, _rom.prgRam, state.prgRam.Length);
+            if (_rom.chrRamEnabled)
+            {
+                Array.Copy(state.chrRom, _rom.chrRom, state.chrRom.Length);
+            }
+            iflag = state.iflag;
+            verticalMirroring = state.verticalMirroring;
+
         }
 
     }
