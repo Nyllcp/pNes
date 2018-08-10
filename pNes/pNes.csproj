@@ -103,7 +103,7 @@
     <Compile Include="Audio.cs" />
     <Compile Include="Cartridge.cs" />
     <Compile Include="Core.cs" />
-    <Compile Include="DPCM.cs" />
+    <Compile Include="Sound Channels\DPCM.cs" />
     <Compile Include="Main.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -119,16 +119,16 @@
     <Compile Include="Mappers\Mapper66.cs" />
     <Compile Include="Mappers\Mapper7.cs" />
     <Compile Include="Mappers\Mapper9.cs" />
-    <Compile Include="NoiseChannel.cs" />
+    <Compile Include="Sound Channels\NoiseChannel.cs" />
     <Compile Include="Ppu.cs" />
     <Compile Include="Processor.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="PulseChannel.cs" />
+    <Compile Include="Sound Channels\PulseChannel.cs" />
     <Compile Include="Rom.cs" />
     <Compile Include="Savestate.cs" />
     <Compile Include="Sprite.cs" />
-    <Compile Include="TriangleChannel.cs" />
+    <Compile Include="Sound Channels\TriangleChannel.cs" />
     <EmbeddedResource Include="Main.resx">
       <DependentUpon>Main.cs</DependentUpon>
     </EmbeddedResource>
